@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 import asyncio
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import gzip
 import json
@@ -13,14 +14,56 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import uuid
 from urllib.parse import urlsplit, urlunsplit
 import httpx
+import psycopg
 from common import ROOT, LOCAL, LABEL, capture, config, day, db, digest, lock, now, pg_env, read_json, run, session_active, write_json
 import publication
 
 STATE = LOCAL/'state.json'
 COLLECTOR = ROOT/'vendor/collect_proxies.py'
+
+class RunInterrupted(KeyboardInterrupt):
+    def __init__(self, signum):
+        self.signum=signum
+        super().__init__(f'Interrupted by {signal.Signals(signum).name}; checkpoints retained')
+
+class DiscoveryIncomplete(RuntimeError):
+    pass
+
+@contextmanager
+def shutdown_signals():
+    def interrupt(signum, frame):
+        # Further shutdown signals must not interrupt checkpointing or child cleanup.
+        for sig in (signal.SIGINT,signal.SIGTERM): signal.signal(sig,signal.SIG_IGN)
+        raise RunInterrupted(signum)
+    previous={sig:signal.signal(sig,interrupt) for sig in (signal.SIGINT,signal.SIGTERM)}
+    try: yield
+    finally:
+        for sig,handler in previous.items(): signal.signal(sig,handler)
+
+def readiness(c):
+    try:
+        with db(c,connect_timeout=5,options='-c statement_timeout=5000') as connection:
+            connection.execute('SELECT 1').fetchone()
+    except (psycopg.Error,OSError) as exc:
+        return {'ready':False,'waiting_for':'database','detail':str(exc),'checked_at':now()}
+    try:
+        with httpx.Client(timeout=10,trust_env=False,follow_redirects=True) as client:
+            client.get('https://github.com').raise_for_status()
+    except httpx.HTTPError as exc:
+        return {'ready':False,'waiting_for':'internet','detail':str(exc),'checked_at':now()}
+    return {'ready':True,'checked_at':now()}
+
+def stop_discovery_child(child):
+    if child.poll() is not None: return
+    try: child.terminate()
+    except ProcessLookupError: pass
+    try: child.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        child.kill(); child.wait(timeout=5)
 
 def source_records(c, full=False):
     columns='*' if full else 'url,kind,protocol_hints,enabled,status,fetched_at'
@@ -110,6 +153,8 @@ def discover(c, folder, record):
     env['PATH']='/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'
     record.update(discovery_model=c['model'],discovery_effort=c['reasoning_effort'],discovery_deadline=None)
     write_json(folder/'run.json',record)
+    attempt_started_ns=time.time_ns()
+    turn_completed=False
     # No timeout: the user explicitly requested unrestricted research duration.
     with (workspace/'events.jsonl').open('a') as log, (workspace/'stderr.log').open('a') as err:
         child=subprocess.Popen(command,cwd=workspace,env=env,stdout=subprocess.PIPE,stderr=err,text=True)
@@ -123,16 +168,25 @@ def discover(c, folder, record):
                     record['discovery_session']=event['thread_id']; write_json(folder/'run.json',record)
                 if event.get('type')=='turn.completed':
                     record['discovery_usage']=event.get('usage')
+                    turn_completed=True
+                elif event.get('type') in ('turn.started','turn.failed'):
+                    turn_completed=False
             if child.wait()!=0:
-                raise RuntimeError('Codex discovery failed; see research/events.jsonl and stderr.log')
+                raise DiscoveryIncomplete('Codex discovery exited before completion; the saved session will resume')
         finally:
-            if child.poll() is None:
-                child.terminate(); child.wait()
+            stop_discovery_child(child)
             record.pop('child_pid',None)
             write_json(folder/'run.json',record)
+    if not turn_completed:
+        raise DiscoveryIncomplete('Codex did not report a completed turn; the saved session will resume')
+    summary_path=workspace/'research_summary.json'
+    summary=read_json(summary_path)
+    if (not isinstance(summary,dict) or summary.get('completion_status') not in ('complete','completed')
+            or summary_path.stat().st_mtime_ns<attempt_started_ns):
+        raise DiscoveryIncomplete('Research has no fresh completed summary; the saved session will resume')
     rows=candidate_rows(workspace/'candidates.json')
     write_json(folder/'candidates.json',rows)
-    record['research_summary']=read_json(workspace/'research_summary.json',{'summary':(workspace/'final.txt').read_text() if (workspace/'final.txt').exists() else 'Research completed'})
+    record['research_summary']=summary
 
 async def validate_candidates(c, folder):
     sys.path.insert(0,str(ROOT/'vendor'))
@@ -249,11 +303,10 @@ def pipeline(c,folder,record):
                 discover(c,folder,record)
             except Exception as exc:
                 record['discovery_error']=str(exc)
-                record['issues'].append('discovery_incomplete')
-                # Preserve parsable partial findings; known feeds can still be refreshed.
-                try: rows=candidate_rows(folder/'research/candidates.json')
-                except Exception: rows=[]
-                write_json(folder/'candidates.json',rows)
+                if 'discovery_incomplete' not in record['issues']: record['issues'].append('discovery_incomplete')
+                raise
+            record.pop('discovery_error',None)
+            record['issues']=[x for x in record['issues'] if x!='discovery_incomplete']
         stage('discovery',research)
         stage('validation',lambda:asyncio.run(validate_candidates(c,folder)))
         stage('source_import',lambda:add_sources(c,read_json(folder/'validation.json',[])))
@@ -294,19 +347,23 @@ def execute(c,mode,seed=False):
         state=read_json(STATE,{})
         if mode=='check':
             if not due(c,state,session_active()): return
-            if state.get('retry_after') and datetime.now(timezone.utc)<datetime.fromisoformat(state['retry_after']): return
-            # A bounded network request checks connectivity, never research duration.
-            try:
-                with httpx.Client(timeout=10,trust_env=False) as client: client.get('https://api.github.com').raise_for_status()
-            except httpx.HTTPError: return
+        ready=readiness(c)
+        write_json(LOCAL/'readiness.json',ready)
+        if not ready['ready']:
+            # Readiness failures are not run attempts and never advance a stage.
+            state['retry_after']=None; write_json(STATE,state)
+            print(json.dumps(ready),flush=True)
+            return
+        if mode=='check' and state.get('retry_after') and datetime.now(timezone.utc)<datetime.fromisoformat(state['retry_after']): return
         if state.get('active_run'):
             folder=LOCAL/'runs'/state['active_run']; record=read_json(folder/'run.json')
         else:
             folder,record=new_record(c,seed)
             state['active_run']=folder.name; write_json(STATE,state)
         record['attempts']+=1; record['pid']=os.getpid(); write_json(folder/'run.json',record)
-        if record.get('error'):
+        if 'error' in record:
             record.setdefault('previous_errors',[]).append({'at':record.pop('failed_at',None),'error':record.pop('error')})
+            record.pop('error_kind',None)
             write_json(folder/'run.json',record)
         awake=subprocess.Popen(['/usr/bin/caffeinate','-i','-w',str(os.getpid())],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         try:
@@ -318,10 +375,11 @@ def execute(c,mode,seed=False):
             write_json(STATE,state)
             print(json.dumps({'completed':folder.name,'configurations':report['catalog_after'],'issues':record['issues']}),flush=True)
         except BaseException as exc:
-            record.update(error=str(exc),failed_at=now()); write_json(folder/'run.json',record)
+            record.update(error=str(exc) or type(exc).__name__,failed_at=now(),
+                          error_kind='interrupted' if isinstance(exc,KeyboardInterrupt) else 'failed')
+            write_json(folder/'run.json',record)
             state=read_json(STATE,{})
-            wait=timedelta(minutes=10) if record['attempts']<3 else timedelta(hours=12)
-            state['retry_after']=(datetime.now(timezone.utc)+wait).isoformat(); write_json(STATE,state)
+            state['retry_after']=(datetime.now(timezone.utc)+timedelta(seconds=60)).isoformat(); write_json(STATE,state)
             raise
         finally:
             awake.terminate()
@@ -329,6 +387,9 @@ def execute(c,mode,seed=False):
 def install(c):
     state=read_json(STATE,{})
     if not state.get('last_restore_week'): raise RuntimeError('Complete a full GitHub download/restore audit before installing')
+    if c.get('postgres_service'):
+        from postgres_service import install as install_postgres
+        install_postgres(c)
     path=Path.home()/'Library/LaunchAgents'/f'{LABEL}.plist'
     data={'Label':LABEL,'ProgramArguments':[str(ROOT/'.venv/bin/python'),str(ROOT/'catalog.py'),'check'],
           'WorkingDirectory':str(ROOT),'RunAtLoad':True,'StartInterval':60,'ProcessType':'Background',
@@ -352,21 +413,32 @@ def disable():
 def main():
     os.umask(0o077)
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['run','seed','resume','check','status','install','disable','sync','restore'])
+    parser.add_argument('command',choices=['run','seed','resume','check','status','install','disable','install-postgres','disable-postgres','sync','restore'])
     parser.add_argument('--tag')
     parser.add_argument('--destination',type=Path)
     parser.add_argument('--database')
     args=parser.parse_args(); c=config()
     if args.command in ('run','seed','resume','check'):
-        try: execute(c,args.command,seed=args.command=='seed')
+        try:
+            with shutdown_signals(): execute(c,args.command,seed=args.command=='seed')
         except BlockingIOError: print('Another runner is already active.')
+        except RunInterrupted as exc:
+            print(str(exc),flush=True)
+            return 128+exc.signum
     elif args.command=='status':
         state=read_json(STATE,{})
         active=state.get('active_run')
         print(json.dumps({'state':state,'run':read_json(LOCAL/'runs'/active/'run.json') if active else None,
+                          'readiness':read_json(LOCAL/'readiness.json'),
                           'session_active':session_active(),'latest':read_json(ROOT/'latest.json')},default=str,indent=2))
     elif args.command=='install': install(c)
     elif args.command=='disable': disable()
+    elif args.command=='install-postgres':
+        from postgres_service import install as install_postgres
+        install_postgres(c)
+    elif args.command=='disable-postgres':
+        from postgres_service import disable as disable_postgres
+        disable_postgres()
     elif args.command=='sync':
         latest=read_json(ROOT/'latest.json',{})
         tag=args.tag or latest.get('tag')
@@ -378,4 +450,4 @@ def main():
         if not args.destination or not args.database: raise ValueError('Specify --destination and --database proxy_catalog_restore_NAME')
         print(json.dumps(publication.restore_verify(c,args.destination,args.database,keep=True),indent=2))
 
-if __name__=='__main__': main()
+if __name__=='__main__': sys.exit(main())

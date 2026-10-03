@@ -1,0 +1,40 @@
+{
+  "verified_at": "2026-10-03T08:46:35.384393+00:00",
+  "unit_tests_passed": 54,
+  "controlled_recovery_pilot": {
+    "at": "2026-10-03T08:41:22.547857+00:00",
+    "runner": {
+      "dependency_wait_preserved_attempts": true,
+      "duplicate_runner_rejected": true,
+      "sigterm_preserved_discovery": true,
+      "child_stopped": true,
+      "same_session_resumed": true,
+      "saved_candidates_preserved": true,
+      "completion_required_before_validation": true
+    },
+    "postgres": {
+      "existing_database_not_restarted": true,
+      "database_started_when_absent": true,
+      "managed_database_stopped_cleanly": true,
+      "launchagent_restart_passed": true,
+      "temporary_cluster_removed": true,
+      "live_cluster_untouched": true
+    },
+    "full_mac_reboot_tested": false
+  },
+  "live_deployment": {
+    "run_id": "20261003T074719Z-122ab0",
+    "session": "01a100bb-60ad-75b1-b5d1-faba7bf6c2cb",
+    "automatic_restart_passed": true,
+    "same_session_resumed": true,
+    "saved_candidates_preserved": true,
+    "candidates_before": 2785,
+    "candidates_after": 2789,
+    "database_not_restarted": true,
+    "postgres_login_service_loaded": true,
+    "full_mac_reboot_tested": false
+  },
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "max",
+  "research_deadline": null
+}

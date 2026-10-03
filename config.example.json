@@ -5,6 +5,7 @@
   "reasoning_effort": "max",
   "codex": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
   "database": {"dbname": "proxy", "user": "mahmud", "host": "localhost", "port": 5432},
+  "postgres_service": {"data_directory": "/absolute/path/to/existing/postgres/cluster"},
   "concurrency": 24,
   "per_host": 2,
   "github_concurrency": 8,

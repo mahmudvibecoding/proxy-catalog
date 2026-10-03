@@ -65,10 +65,11 @@ def run(args, **kwargs):
 def capture(args, **kwargs):
     return run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs).stdout
 
-def db(c, dbname=None, autocommit=True):
+def db(c, dbname=None, autocommit=True, **overrides):
     opts = dict(c['database'])
     if dbname:
         opts['dbname'] = dbname
+    opts.update(overrides)
     connection = psycopg.connect(**opts, autocommit=autocommit, row_factory=dict_row)
     return connection
 
