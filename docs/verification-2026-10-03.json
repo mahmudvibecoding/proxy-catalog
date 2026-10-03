@@ -49,5 +49,16 @@
     "live_database_untouched": true
   },
   "release": "https://github.com/mahmudvibecoding/proxy-catalog/releases/tag/catalog-20261003T073737Z-441b73",
-  "wake_validation": "Scheduling fixtures and live unlocked-session check passed; an actual sleep/wake cycle remains to be observed."
+  "wake_validation": "Scheduling fixtures and live unlocked-session check passed; an actual sleep/wake cycle remains to be observed.",
+  "launchagent": {
+    "installed_at": "2026-10-03T07:50:24.296506+00:00",
+    "label": "com.mahmud.proxy-catalog.daily",
+    "interval_seconds": 60,
+    "first_run": "20261003T074719Z-122ab0",
+    "discovery_session": "01a100bb-60ad-75b1-b5d1-faba7bf6c2cb",
+    "observed_model": "gpt-6.1-sol",
+    "observed_effort": "max",
+    "live_search_observed": true,
+    "duplicate_launch_blocked": true
+  }
 }
