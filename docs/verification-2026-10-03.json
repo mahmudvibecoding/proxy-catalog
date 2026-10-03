@@ -1,0 +1,53 @@
+{
+  "verified_at": "2026-10-03T07:47:13.760483+00:00",
+  "unit_and_parser_tests_passed": 44,
+  "cli_model": "gpt-6.1-sol",
+  "cli_effort": "max",
+  "discovery_deadline": null,
+  "cli_live_search_verified": true,
+  "github_pilot": {
+    "tag": "mac-feasibility-20261003T072135Z",
+    "verified": true,
+    "sha256": "c45211a8018b9d3ddf257ee2bac39c4735389453328340bd2a7dde2dbfbfea68"
+  },
+  "full_restore": {
+    "verified_at": "2026-10-03T07:43:47.008125+00:00",
+    "database": "proxy_catalog_verify_01fc10270c78",
+    "tables": {
+      "proxies": {
+        "rows": 6184647,
+        "content_fingerprint": "-196857539085695450317"
+      },
+      "proxy_stats": {
+        "rows": 6014525,
+        "content_fingerprint": "-1476066360222834237136"
+      },
+      "proxy_lists": {
+        "rows": 11055,
+        "content_fingerprint": "1276407588212792880679"
+      },
+      "identity_sequence": {
+        "last_value": 65165860,
+        "is_called": true
+      }
+    },
+    "dump_sha256": "01fc10270c78e6039b1713fcbcd9972db4f154337eb7e8e7e76583e924bd9226",
+    "kept": false
+  },
+  "full_download": {
+    "verified_at": "2026-10-03T07:42:22.912342+00:00",
+    "tag": "catalog-20261003T073737Z-441b73",
+    "dump_sha256": "01fc10270c78e6039b1713fcbcd9972db4f154337eb7e8e7e76583e924bd9226"
+  },
+  "collector_pilot": {
+    "database": "proxy_catalog_verify_pilot_e84a590c18",
+    "sources": 2,
+    "configurations": 4,
+    "resume_passed": true,
+    "repeat_import_preserved_ids": true,
+    "statistics_preserved": true,
+    "live_database_untouched": true
+  },
+  "release": "https://github.com/mahmudvibecoding/proxy-catalog/releases/tag/catalog-20261003T073737Z-441b73",
+  "wake_validation": "Scheduling fixtures and live unlocked-session check passed; an actual sleep/wake cycle remains to be observed."
+}
