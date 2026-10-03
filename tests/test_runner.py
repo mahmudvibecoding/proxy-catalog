@@ -49,6 +49,12 @@ class RunnerTests(unittest.TestCase):
         path=self.root/'candidates.json'; path.write_text('{bad')
         with self.assertRaises(json.JSONDecodeError): catalog.candidate_rows(path)
 
+    def test_one_bad_candidate_does_not_discard_good_findings(self):
+        path=self.root/'candidates.json'
+        write_json(path,[{'url':'file:///private'},{'url':'https://example.com/feed'}])
+        self.assertEqual(len(catalog.candidate_rows(path)),1)
+        self.assertEqual(len(read_json(path.with_suffix('.rejected.json'))),1)
+
     def test_command_preserves_model_and_has_no_deadline(self):
         for session in (None,'session-id'):
             cmd=catalog.discovery_command(self.c,self.root,session)
@@ -69,6 +75,18 @@ class RunnerTests(unittest.TestCase):
     def test_restore_cannot_target_live_database(self):
         write_json(self.root/'manifest.json',{'dump_sha256':'x'})
         with self.assertRaises(ValueError): publication.restore_verify({},self.root,'proxy')
+
+    def test_draft_release_recovers_after_create_without_journal(self):
+        error=subprocess.CalledProcessError(1,['gh','api'],stderr='HTTP 404')
+        draft={'id':123,'draft':True,'tag_name':'catalog-test'}
+        with patch.object(publication,'gh_api',side_effect=[error,[draft]]):
+            self.assertEqual(publication.release_record({'repository':'owner/repo'},'catalog-test'),draft)
+
+    def test_release_lookup_does_not_treat_auth_failure_as_missing(self):
+        error=subprocess.CalledProcessError(1,['gh','api'],stderr='HTTP 401')
+        with patch.object(publication,'gh_api',side_effect=error):
+            with self.assertRaises(subprocess.CalledProcessError):
+                publication.release_record({'repository':'owner/repo'},'catalog-test')
 
     def test_resume_skips_completed_discovery_collection_and_upload(self):
         record={'started_at':'x','completed':['baseline','discovery','validation','source_import','collection',

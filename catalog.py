@@ -58,17 +58,21 @@ def normalize_url(url):
 def candidate_rows(path):
     rows=read_json(path,[])
     if not isinstance(rows,list): raise ValueError('candidates.json must be an array')
-    unique={}
-    for row in rows:
-        if not isinstance(row,dict): raise ValueError('Candidate must be an object')
-        url=normalize_url(row['url'])
-        kind=row.get('kind','feed_candidate')
-        hints=row.get('protocol_hints',[])
-        if kind not in ('feed_candidate','api_candidate') or not isinstance(hints,list) or any(not isinstance(x,str) for x in hints):
-            raise ValueError('Invalid candidate kind or protocol hints')
-        evidence=normalize_url(row.get('evidence_url') or url)
-        unique[url]={'url':url,'kind':kind,'protocol_hints':sorted(set(hints)),
-                     'evidence_url':evidence,'notes':str(row.get('notes',''))}
+    unique={}; rejected=[]
+    for index,row in enumerate(rows):
+        try:
+            if not isinstance(row,dict): raise ValueError('Candidate must be an object')
+            url=normalize_url(row['url'])
+            kind=row.get('kind','feed_candidate')
+            hints=row.get('protocol_hints',[])
+            if kind not in ('feed_candidate','api_candidate') or not isinstance(hints,list) or any(not isinstance(x,str) for x in hints):
+                raise ValueError('Invalid candidate kind or protocol hints')
+            evidence=normalize_url(row.get('evidence_url') or url)
+            unique[url]={'url':url,'kind':kind,'protocol_hints':sorted(set(hints)),
+                         'evidence_url':evidence,'notes':str(row.get('notes',''))}
+        except (KeyError,TypeError,ValueError,AttributeError) as exc:
+            rejected.append({'index':index,'error':str(exc)})
+    if rejected: write_json(Path(path).with_suffix('.rejected.json'),rejected)
     return list(unique.values())
 
 def discovery_command(c, workspace, session=None):
@@ -296,6 +300,9 @@ def execute(c,mode,seed=False):
             folder,record=new_record(c,seed)
             state['active_run']=folder.name; write_json(STATE,state)
         record['attempts']+=1; record['pid']=os.getpid(); write_json(folder/'run.json',record)
+        if record.get('error'):
+            record.setdefault('previous_errors',[]).append({'at':record.pop('failed_at',None),'error':record.pop('error')})
+            write_json(folder/'run.json',record)
         awake=subprocess.Popen(['/usr/bin/caffeinate','-i','-w',str(os.getpid())],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         try:
             report=pipeline(c,folder,record)
