@@ -1,0 +1,21 @@
+{
+  "run_id": "20261003T073737Z-441b73",
+  "kind": "initial_backup",
+  "started_at": "2026-10-03T07:37:37.774555+00:00",
+  "finished_collection_at": "2026-10-03T07:37:41.375093+00:00",
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "max",
+  "discovery_deadline": null,
+  "research_summary": null,
+  "discovery_error": null,
+  "candidates": 0,
+  "validated_sources": 0,
+  "catalog_before": 6184647,
+  "new_configurations": 0,
+  "existing_seen": null,
+  "existing_not_seen": null,
+  "catalog_after": 6184647,
+  "collection": null,
+  "proxy_testing": "stopped",
+  "discovery_usage": null
+}
