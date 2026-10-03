@@ -36,5 +36,28 @@
   },
   "model": "gpt-6.1-sol",
   "reasoning_effort": "max",
-  "research_deadline": null
+  "research_deadline": null,
+  "actual_mac_reboot": {
+    "verified_at": "2026-10-03T08:58:22.825872+00:00",
+    "booted_at": "2026-10-03T08:48:42+00:00",
+    "postgres_started_at": "2026-10-03T08:50:35.073816+00:00",
+    "database_query_passed": true,
+    "initial_dependency_wait_at": "2026-10-03T08:50:33.781447+00:00",
+    "dependencies_ready_at": "2026-10-03T08:51:36.192746+00:00",
+    "research_resumed_at": "2026-10-03T08:51:36.204647+00:00",
+    "automatic_login_recovery_passed": true,
+    "manual_service_start_required": false,
+    "run_id": "20261003T074719Z-122ab0",
+    "same_run_and_session_resumed": true,
+    "session": "01a100bb-60ad-75b1-b5d1-faba7bf6c2cb",
+    "runner_pid": 1585,
+    "research_child_pid": 1594,
+    "research_stage": "discovery",
+    "saved_candidate_urls_preserved": 2785,
+    "candidate_urls_after_boot_first_check": 2841,
+    "candidate_urls_at_verification": 3001,
+    "frontier_entries_at_verification": 55763,
+    "new_progress_after_boot": true,
+    "full_mac_reboot_tested": true
+  }
 }
