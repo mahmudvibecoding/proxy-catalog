@@ -76,16 +76,21 @@ def candidate_rows(path):
     return list(unique.values())
 
 def discovery_command(c, workspace, session=None):
+    prompt=('Read the current TASK.md in full and follow its exhaustive research instructions. '
+            'The user wants the largest possible database of unique publicly published proxy configurations. '
+            'Treat this as your only research opportunity: pursue all actionable leads now and do not defer them to future days. '
+            'Preserve existing candidates, evidence, and checkpoints. There is no deadline or research limit. '
+            'Save progress incrementally, audit the frontier and coverage before concluding, and validate all JSON files before finishing.')
     command=[c['codex'],'exec','--ignore-user-config','-m',c['model'],
              '-c',f'model_reasoning_effort="{c["reasoning_effort"]}"',
              '-c','web_search="live"','-c','forced_login_method="chatgpt"',
              '-c','approval_policy="never"','--sandbox','workspace-write',
              '-c','sandbox_workspace_write.network_access=true','--json']
     if session:
-        command+=['resume',session,'Continue the interrupted research described in TASK.md. Preserve candidates.json and checkpoints. There is no deadline or research limit. Validate all JSON files before finishing.']
+        command+=['resume',session,'Continue the same research session. TASK.md may have changed since the previous turn. '+prompt]
     else:
         command+=['-C',str(workspace),'-o',str(workspace/'final.txt'),
-                  'Read TASK.md and carry out the daily public-source research. There is no deadline or research limit. Save candidates incrementally and validate all JSON files before finishing.']
+                  prompt]
     return command
 
 def discover(c, folder, record):
