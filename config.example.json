@@ -1,0 +1,15 @@
+{
+  "repository": "mahmudvibecoding/proxy-catalog",
+  "timezone": "Asia/Tashkent",
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "max",
+  "codex": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+  "database": {"dbname": "proxy", "user": "mahmud", "host": "localhost", "port": 5432},
+  "concurrency": 24,
+  "per_host": 2,
+  "github_concurrency": 8,
+  "retries": 2,
+  "chunk_bytes": 536870912,
+  "retain_daily": 7,
+  "retain_weekly": 4
+}
