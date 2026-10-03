@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -79,6 +81,18 @@ def pg_env(c, dbname=None):
     env['PROXY_STORAGE'] = c.get('storage', str(LOCAL / 'proxy-collection'))
     env['PGOPTIONS'] = '-c timezone=UTC'
     return env
+
+def pg_tool(c, name, major):
+    candidates=[]
+    if c.get('pg_bin'): candidates.append(str(Path(c['pg_bin'])/name))
+    candidates += [f'/opt/homebrew/opt/postgresql@{major}/bin/{name}',
+                   f'/usr/local/opt/postgresql@{major}/bin/{name}',shutil.which(name)]
+    for candidate in candidates:
+        if not candidate or not Path(candidate).is_file(): continue
+        version=capture([candidate,'--version'])
+        match=re.search(r'PostgreSQL\)?\s+(\d+)',version)
+        if match and int(match.group(1))==int(major): return candidate
+    raise RuntimeError(f'Install PostgreSQL {major} client tools or set pg_bin to their directory')
 
 @contextlib.contextmanager
 def lock(path=LOCAL / 'runner.lock'):

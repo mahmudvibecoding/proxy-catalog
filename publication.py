@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from psycopg import sql
-from common import ROOT, LOCAL, capture, db, digest, gh, gh_api, now, pg_env, read_json, run, table_metrics, write_json
+from common import ROOT, LOCAL, capture, db, digest, gh, gh_api, now, pg_env, pg_tool, read_json, run, table_metrics, write_json
 
 TAG_PREFIX = 'catalog-'
 
@@ -37,7 +37,7 @@ def make_snapshot(c, folder, report):
                 snapshot = connection.execute('SELECT pg_export_snapshot() AS id').fetchone()['id']
                 backup = out / 'catalog.dump'
                 temp = out / 'catalog.dump.partial'
-                run(['/opt/homebrew/bin/pg_dump', '--format=custom', '--compress=3', '--no-owner', '--no-acl',
+                run([pg_tool(c,'pg_dump',connection.info.server_version//10000), '--format=custom', '--compress=3', '--no-owner', '--no-acl',
                      '--snapshot', snapshot, '--file', temp], env=pg_env(c), stdout=subprocess.DEVNULL)
                 metrics = table_metrics(connection)
                 temp.replace(backup)
@@ -179,7 +179,7 @@ def restore_verify(c, destination, database_name=None, keep=False):
         admin.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
     success = False
     try:
-        run(['/opt/homebrew/bin/pg_restore','--jobs=4','--no-owner','--no-acl','--exit-on-error',
+        run([pg_tool(c,'pg_restore',int(manifest['postgres_version'].split('.')[0])),'--jobs=4','--no-owner','--no-acl','--exit-on-error',
              '--dbname',name,destination/'catalog.dump'],env=pg_env(c,dbname=name),stdout=subprocess.DEVNULL)
         with db(c,dbname=name) as restored:
             restored.execute("SET TIME ZONE 'UTC'")
