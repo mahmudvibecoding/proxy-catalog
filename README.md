@@ -76,8 +76,9 @@ data. On PostgreSQL 18+, imports can commit concurrently; writes follow connecti
 key order to prevent deadlocks. Publication takes an exclusive barrier until
 every active import and its recovery receipt are committed. Download concurrency
 and per-host limits remain configurable independently.
-The collection LaunchAgent uses normal macOS process priority so background CPU
-and disk throttling do not stall imports while research is running.
+The collection and publication LaunchAgents use normal macOS process priority
+so background CPU and disk throttling do not stall imports or backups while
+research is running.
 On PostgreSQL 18 and later, inserted/refreshed counts come from the upsert itself,
 eliminating a separate catalog lookup. Earlier versions analyze each staged batch
 and count new keys using indexed lookups.
