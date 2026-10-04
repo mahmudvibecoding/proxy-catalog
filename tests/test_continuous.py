@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 import uuid
 
 from psycopg import sql
@@ -128,6 +129,29 @@ class JournalTests(unittest.TestCase):
                 if child.poll() is not None:
                     self.fail('Import crossed the active snapshot barrier')
         self.assertEqual(child.communicate(timeout=5)[0].strip(), 'entered')
+
+    def test_publication_barrier_waits_for_all_shared_importers(self):
+        ready = threading.Barrier(3)
+        release = threading.Event()
+        def importing():
+            with worker.import_guard(self.journal.home, shared=True):
+                ready.wait(timeout=5)
+                release.wait(timeout=5)
+        def publishing():
+            with worker.import_guard(self.journal.home):
+                return 'snapshot'
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            workers = [pool.submit(importing) for _ in range(2)]
+            try:
+                ready.wait(timeout=5)
+                publication = pool.submit(publishing)
+                with self.assertRaises(TimeoutError):
+                    publication.result(timeout=0.1)
+            finally:
+                release.set()
+            self.assertEqual(publication.result(timeout=5), 'snapshot')
+            for future in workers:
+                future.result(timeout=5)
 
 
 class PublicationTests(unittest.TestCase):
@@ -387,7 +411,7 @@ worker.apply_download(c,j,job,json.loads(job['result']))
                     ticks.append(time.monotonic())
                     await asyncio.sleep(0.02)
             pulse = asyncio.create_task(heartbeat())
-            outcome = await worker.collect(dict(self.c, concurrency=8, continuous={'parse_workers': 2}),
+            outcome = await worker.collect(dict(self.c, concurrency=8, continuous={'parse_workers': 2, 'import_workers': 1}),
                                            self.journal, limit=5, once=True)
             await pulse
             return outcome
@@ -428,6 +452,101 @@ worker.apply_download(c,j,job,json.loads(job['result']))
         self.assertEqual(len(after), 2500)
         self.assertTrue(all(r['proxy_id'] == ids[r['connection_key']] for r in after if r['connection_key'] in ids))
         self.assertEqual(self.journal.stats()['inserted'], 2500)
+
+    def test_pre_pg18_counting_remains_supported(self):
+        store = worker.collector.Store(acquire_lock=False)
+        self.addCleanup(store.close)
+        with patch.object(type(store.writer.info), 'server_version', new_callable=PropertyMock, return_value=170000):
+            result = worker.apply_download(self.c, self.journal, self.job, self.result(), store)
+        self.assertEqual(result['inserted'], 1)
+        self.assertEqual(result['refreshed'], 0)
+
+    def test_parallel_imports_deduplicate_and_keep_latest_observations(self):
+        self.journal.finish(self.job, {'status': 'test_setup'})
+        rows = [{'url': f'https://example.test/parallel/{i}', 'kind': 'feed_candidate',
+                 'protocol_hints': ['http']} for i in range(8)]
+        self.journal.enqueue('parallel', rows, 'p', 'p')
+        jobs = [self.journal.claim() for _ in rows]
+        at = datetime.now(timezone.utc)
+        results = []
+        for i, job in enumerate(jobs):
+            # Reverse every other source's input order to exercise lock ordering.
+            addresses = list(range(150)) + list(range(150 + i * 20, 170 + i * 20))
+            if i % 2: addresses.reverse()
+            result = self.result(''.join(f'http://8.8.{n // 256}.{n % 256}:8080\n' for n in addresses))
+            result.update(list_url=job['url'], finished_at=at + timedelta(seconds=i))
+            self.journal.downloaded(job, result)
+            worker.collector.prepare_import(result)
+            results.append(result)
+        importer = worker.Importer(self.c, self.journal)
+        self.addCleanup(importer.close)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            outcomes = list(pool.map(lambda pair: importer.apply(*pair), zip(jobs, results)))
+        self.assertEqual(sum(r['inserted'] for r in outcomes), 310)
+        saved = self.snapshot()
+        self.assertEqual(len(saved['proxies']), 310)
+        self.assertEqual(len(saved['sources']), 8)
+        self.assertEqual(self.journal.stats()['states'], {'empty': 1, 'imported': 8})
+        for proxy in saved['proxies']:
+            n = int(proxy['address'].split('.')[-2]) * 256 + int(proxy['address'].split('.')[-1])
+            latest = 7 if n < 150 else (n - 150) // 20
+            self.assertEqual(proxy['last_seen_at'], at + timedelta(seconds=latest))
+        # Replaying any source after its receipt was committed changes no rows.
+        for job, result in zip(jobs, results):
+            importer.apply(job, result)
+        self.assertEqual(saved, self.snapshot())
+        self.assertEqual(self.journal.stats()['inserted'], 310)
+
+    def test_shutdown_keeps_queued_downloads_and_finishes_active_transaction(self):
+        self.journal.finish(self.job, {'status': 'test_setup'})
+        rows = [{'url': f'https://example.test/stop/{i}', 'kind': 'feed_candidate',
+                 'protocol_hints': ['http']} for i in range(6)]
+        self.journal.enqueue('shutdown', rows, 's', 's')
+        payload = self.result('http://1.1.1.1:8080\n')
+        started, release = threading.Event(), threading.Event()
+        entered = []
+        original = worker.Importer.apply
+        def pausing_import(importer, job, result):
+            entered.append(job['id'])
+            started.set()
+            if not release.wait(timeout=10):
+                raise RuntimeError('Test did not release importer')
+            return original(importer, job, result)
+        class Downloader:
+            def __init__(self, options): self.client = self
+            async def aclose(self): pass
+            async def fetch(self, row): return dict(payload, list_url=row['list_url'])
+        c = dict(self.c, concurrency=6, continuous={'parse_workers': 1, 'import_workers': 1})
+        async def scenario():
+            task = asyncio.create_task(worker.collect(c, self.journal, once=True))
+            try:
+                for _ in range(200):
+                    if started.is_set(): break
+                    await asyncio.sleep(0.01)
+                self.assertTrue(started.is_set())
+                await asyncio.sleep(0.15)
+                task.cancel()
+                asyncio.get_running_loop().call_later(0.1, release.set)
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        with patch.object(worker.collector, 'Downloader', Downloader), \
+             patch.object(worker, 'ProcessPoolExecutor', side_effect=lambda **kw: ThreadPoolExecutor(max_workers=1)), \
+             patch.object(worker.Importer, 'apply', pausing_import):
+            asyncio.run(scenario())
+        self.assertEqual(len(entered), 1)
+        self.assertEqual(self.journal.stats()['states'], {'empty': 1, 'imported': 1, 'leased': 5})
+        self.journal.recover()
+        remaining = [self.journal.claim() for _ in range(5)]
+        self.assertTrue(all(json.loads(job['result'])['status'] == 'downloaded' for job in remaining))
+        for job in remaining:
+            worker.apply_download(self.c, self.journal, job, json.loads(job['result']))
+        self.assertEqual(self.journal.stats()['states'], {'empty': 1, 'imported': 6})
+        self.assertEqual(self.journal.stats()['inserted'], 1)
 
 
 def time_in_future():

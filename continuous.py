@@ -39,6 +39,7 @@ def settings(c):
             'retry_seconds': 300, 'terminal_retry_seconds': 86400,
             'retain_hourly': 24, 'local_snapshots': 2, 'min_free_bytes': 3 * 1024**3,
             'parse_workers': max(1, min(4, (os.cpu_count() or 2) // 2)),
+            'import_workers': 4,
             'max_source_bytes': 256 * 1024**2, **c.get('continuous', {})}
 
 
@@ -47,10 +48,16 @@ def enabled(c):
 
 
 @contextmanager
-def import_guard(home=WORK):
+def import_guard(home=WORK, shared=False):
     home.mkdir(parents=True, exist_ok=True)
-    with (home / 'import.lock').open('a+') as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+    with (home / 'import.lock').open('a+') as stream, (home / 'import-gate.lock').open('a+') as gate:
+        # A waiting publisher holds the entry gate, preventing a continuous
+        # stream of shared imports from starving its exclusive snapshot lock.
+        fcntl.flock(gate, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(stream, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        finally:
+            fcntl.flock(gate, fcntl.LOCK_UN)
         try:
             yield
         finally:
@@ -268,9 +275,13 @@ def apply_download(c, journal, job, downloaded, store=None):
             result['status'] = 'no_valid_entries'
             journal.finish(job, result, retry_seconds=settings(c)['terminal_retry_seconds'], error=result['status'])
             return result
-        with import_guard(journal.home):
+        # PG18 gets exact counts from RETURNING, so independent sources can
+        # commit concurrently. Publishers and the legacy collector remain exclusive.
+        parallel = store.writer.info.server_version >= 180000
+        with import_guard(journal.home, shared=parallel):
             with store.writer.transaction():
-                store.writer.execute("SELECT pg_advisory_xact_lock(hashtextextended('proxy:proxy_collection',0))")
+                advisory = 'pg_advisory_xact_lock_shared' if parallel else 'pg_advisory_xact_lock'
+                store.writer.execute(f"SELECT {advisory}(hashtextextended('proxy:proxy_collection',0))")
                 previous = store.writer.execute('SELECT run_id,status,fetch_state FROM proxy_lists WHERE url=%s',
                                                 (row['url'],)).fetchone()
                 saved = previous['fetch_state'] if previous else {}
@@ -300,23 +311,28 @@ def apply_download(c, journal, job, downloaded, store=None):
 
 
 class Importer:
-    """One writer connection reused on the import executor's sole thread."""
+    """Each import thread reuses its own connections and staging table."""
     def __init__(self, c, journal):
-        self.c, self.journal, self.store = c, journal, None
+        self.c, self.journal = c, journal
+        self.stores = {}
 
     def apply(self, job, result):
+        ident = threading.get_ident()
         try:
-            if result['status'] in ('downloaded', 'downloaded_partial') and self.store is None:
-                self.store = collector.Store(acquire_lock=False)
-            return apply_download(self.c, self.journal, job, result, self.store)
+            if result['status'] in ('downloaded', 'downloaded_partial') and ident not in self.stores:
+                self.stores[ident] = collector.Store(acquire_lock=False)
+            return apply_download(self.c, self.journal, job, result, self.stores.get(ident))
         except BaseException:
-            self.close()
+            store = self.stores.pop(ident, None)
+            if store is not None:
+                store.close()
             raise
 
     def close(self):
-        if self.store is not None:
-            self.store.close()
-            self.store = None
+        # Called only after every submitted import has completed or been cancelled.
+        for store in self.stores.values():
+            store.close()
+        self.stores.clear()
 
 
 async def collect(c, journal, limit=None, once=False):
@@ -325,7 +341,7 @@ async def collect(c, journal, limit=None, once=False):
     options = argparse.Namespace(concurrency=c['concurrency'], per_host=c['per_host'],
         github_concurrency=c['github_concurrency'], retries=c['retries'], max_bytes=settings(c)['max_source_bytes'])
     downloader = collector.Downloader(options)
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='proxy-import')
+    executor = ThreadPoolExecutor(max_workers=settings(c)['import_workers'], thread_name_prefix='proxy-import')
     parsers = ProcessPoolExecutor(max_workers=settings(c)['parse_workers'],
                                   mp_context=multiprocessing.get_context('spawn'))
     importer = Importer(c, journal)
@@ -339,7 +355,8 @@ async def collect(c, journal, limit=None, once=False):
             stats = await asyncio.to_thread(journal.stats)
             await asyncio.to_thread(write_json, journal.home / 'collector-status.json',
                        {'at': now(), 'pid': os.getpid(), 'state': 'running', 'finished_this_process': finished,
-                        'parse_workers': settings(c)['parse_workers'], **stats})
+                        'parse_workers': settings(c)['parse_workers'],
+                        'import_workers': settings(c)['import_workers'], **stats})
             last_intake = await asyncio.to_thread(journal.get, 'last_intake_at', 0)
             if not once and time.time() - last_intake >= settings(c)['intake_seconds']:
                 try:
@@ -378,11 +395,15 @@ async def collect(c, journal, limit=None, once=False):
                 loop = asyncio.get_running_loop()
                 if result['status'] in ('downloaded', 'downloaded_partial'):
                     await loop.run_in_executor(parsers, collector.prepare_import, result, str(collector.STORAGE))
-                future = loop.run_in_executor(executor, importer.apply, job, result)
+                submitted = executor.submit(importer.apply, job, result)
+                future = asyncio.wrap_future(submitted)
                 try:
                     await asyncio.shield(future)
                 except asyncio.CancelledError:
-                    await future
+                    # Queued imports already have durable downloads. Leave them
+                    # for recovery; only wait for transactions currently running.
+                    if not submitted.cancel():
+                        await future
                     raise
             except (OSError, ValueError, RuntimeError, collector.psycopg.Error) as exc:
                 # Keep downloaded pages when an import fails; retries can replay the PG receipt.

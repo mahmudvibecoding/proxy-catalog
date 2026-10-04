@@ -203,6 +203,31 @@ class Store:
     def parsed_cache(self, result):
         return parsed_cache(result)
 
+    def merge_stage(self, observed):
+        upsert = '''INSERT INTO proxies
+            (connection_key,address,port,connection_settings,last_seen_at)
+            SELECT connection_key,address,port,connection_settings,%s FROM proxy_stage
+            ORDER BY connection_key
+            ON CONFLICT (connection_key) DO UPDATE SET
+                last_seen_at=GREATEST(proxies.last_seen_at,excluded.last_seen_at)
+            WHERE excluded.last_seen_at > proxies.last_seen_at'''
+        if self.writer.info.server_version >= 180000:
+            # PG18 reports the old row directly, avoiding a separate existence
+            # lookup for every configuration before doing the same lookup to upsert.
+            counts = self.writer.execute('WITH changed AS (' + upsert + '''
+                RETURNING old.proxy_id IS NULL AS inserted)
+                SELECT count(*) FILTER (WHERE inserted) AS inserted,
+                       count(*) FILTER (WHERE NOT inserted) AS refreshed FROM changed''', (observed,)).fetchone()
+            return counts['inserted'], counts['refreshed']
+        # Autovacuum cannot analyze temporary tables. Keep the compatibility
+        # path from scanning the full catalog for each batch.
+        self.writer.execute('ANALYZE proxy_stage')
+        inserted = self.writer.execute('''SELECT count(*) AS n FROM proxy_stage s
+            WHERE NOT EXISTS (SELECT 1 FROM proxies p
+                              WHERE p.connection_key=s.connection_key)''').fetchone()['n']
+        changed = self.writer.execute(upsert, (observed,))
+        return inserted, changed.rowcount - inserted
+
     def save(self, result):
         cache = None
         partial = result['status'] == 'downloaded_partial'
@@ -237,19 +262,7 @@ class Store:
                     with gzip.open(copy_path, 'rb') as f:
                         while block := f.read(1024 * 1024):
                             cp.write(block)
-                # Autovacuum cannot analyze temporary tables. Without current batch
-                # statistics the planner can scan the entire multi-million-row catalog.
-                self.writer.execute('ANALYZE proxy_stage')
-                inserted = self.writer.execute('''SELECT count(*) AS n FROM proxy_stage s
-                    WHERE NOT EXISTS (SELECT 1 FROM proxies p
-                                      WHERE p.connection_key=s.connection_key)''').fetchone()['n']
-                changed = self.writer.execute('''INSERT INTO proxies
-                    (connection_key,address,port,connection_settings,last_seen_at)
-                    SELECT connection_key,address,port,connection_settings,%s FROM proxy_stage
-                    ON CONFLICT (connection_key) DO UPDATE SET
-                        last_seen_at=GREATEST(proxies.last_seen_at,excluded.last_seen_at)
-                    WHERE excluded.last_seen_at > proxies.last_seen_at''', (observed,))
-                refreshed = changed.rowcount - inserted
+                inserted, refreshed = self.merge_stage(observed)
             # Membership history is intentionally absent. Reparsing can add corrected
             # configurations but cannot prove an old one is safe to delete.
             if result.get('continuous_receipt'):

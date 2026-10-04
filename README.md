@@ -70,12 +70,15 @@ retained independently.
 Queue selection uses an index in processing order, and queue operations run off
 the download event loop. Up to four separate processes parse and prepare imports
 while downloads continue. Set `continuous.parse_workers` to tune this count;
-the default uses half the available CPUs, capped at four. One database writer
-reuses its connections and streams prepared COPY data. Imports and publication
-still share the same commit barrier and recovery receipts. Download concurrency
+the default uses half the available CPUs, capped at four. Four database workers
+(`continuous.import_workers`) reuse their connections and stream prepared COPY
+data. On PostgreSQL 18+, imports can commit concurrently; writes follow connection
+key order to prevent deadlocks. Publication takes an exclusive barrier until
+every active import and its recovery receipt are committed. Download concurrency
 and per-host limits remain configurable independently.
-Each staged batch is analyzed before counting new keys, allowing PostgreSQL to
-use indexed lookups instead of repeatedly scanning the full proxy catalog.
+On PostgreSQL 18 and later, inserted/refreshed counts come from the upsert itself,
+eliminating a separate catalog lookup. Earlier versions analyze each staged batch
+and count new keys using indexed lookups.
 
 ## Daily behavior
 
