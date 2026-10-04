@@ -39,7 +39,8 @@ def make_snapshot(c, folder, report):
                 snapshot = connection.execute('SELECT pg_export_snapshot() AS id').fetchone()['id']
                 backup = out / 'catalog.dump'
                 temp = out / 'catalog.dump.partial'
-                run([pg_tool(c,'pg_dump',connection.info.server_version//10000), '--format=custom', '--compress=3', '--no-owner', '--no-acl',
+                compression = c.get('snapshot_compression', 'zstd:1' if connection.info.server_version >= 180000 else '1')
+                run([pg_tool(c,'pg_dump',connection.info.server_version//10000), '--format=custom', '--compress=' + compression, '--no-owner', '--no-acl',
                      '--snapshot', snapshot, '--file', temp], env=pg_env(c), stdout=subprocess.DEVNULL)
                 metrics = table_metrics(connection)
                 temp.replace(backup)
@@ -66,6 +67,7 @@ def make_snapshot(c, folder, report):
     manifest = {'format_version':1, 'created_at':now(), 'run_id':folder.name, 'repository':c['repository'],
                 'code_commit':capture(['git','rev-parse','HEAD'],cwd=ROOT).strip(),
                 'postgres_version':server_version, 'database_bytes':size, 'tables':metrics,
+                'compression':compression,
                 'dump_sha256':digest(backup), 'dump_bytes':backup.stat().st_size, 'assets':assets,
                 'cache_policy':'Source payload and parser caches remain local; restore starts fresh downloads. Source records and run evidence are included.'}
     write_json(out/'manifest.json',manifest)

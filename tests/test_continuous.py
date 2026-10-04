@@ -548,6 +548,19 @@ worker.apply_download(c,j,job,json.loads(job['result']))
         self.assertEqual(self.journal.stats()['states'], {'empty': 1, 'imported': 6})
         self.assertEqual(self.journal.stats()['inserted'], 1)
 
+    def test_fast_snapshot_restores_rows_statistics_and_identity_sequence(self):
+        worker.apply_download(self.c, self.journal, self.job,
+                              self.result('http://8.8.8.8:8080\nsocks5://1.1.1.1:1080\n'))
+        with db(self.c) as conn:
+            conn.execute('INSERT INTO proxy_stats(proxy_id,connection_attempts,last_connection_attempt_at) SELECT proxy_id,7,now() FROM proxies')
+        folder = self.folder / 'snapshot-test'
+        folder.mkdir()
+        manifest = publication.make_snapshot(dict(self.c, chunk_bytes=1024), folder, {'kind': 'test'})
+        self.assertEqual(manifest['tables']['proxies']['rows'], 2)
+        self.assertEqual(manifest['tables']['proxy_stats']['rows'], 2)
+        proof = publication.restore_verify(self.c, folder / 'snapshot')
+        self.assertEqual(proof['tables'], manifest['tables'])
+
 
 def time_in_future():
     return datetime.now(timezone.utc).timestamp() + 100000

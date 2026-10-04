@@ -82,6 +82,10 @@ research is running.
 On PostgreSQL 18 and later, inserted/refreshed counts come from the upsert itself,
 eliminating a separate catalog lookup. Earlier versions analyze each staged batch
 and count new keys using indexed lookups.
+Snapshots use fast lossless Zstandard compression on PostgreSQL 18+ (gzip level 1
+on earlier versions), reducing time spent holding the import barrier. Override
+`snapshot_compression` if the installed PostgreSQL tools require another method.
+The same checksums, table fingerprints, sequence checks, and restore audits apply.
 
 ## Daily behavior
 
