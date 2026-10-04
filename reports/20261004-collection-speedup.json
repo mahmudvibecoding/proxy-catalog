@@ -1,0 +1,108 @@
+{
+  "kind": "performance_verification",
+  "recorded_at": "2026-10-04T06:54:22.056819+00:00",
+  "implementation_commit": "9264697",
+  "runtime": {
+    "parse_processes": 4,
+    "database_workers": 4,
+    "download_concurrency": 24,
+    "raw_github_concurrency": 8,
+    "macos_launchagent_priority": "Standard",
+    "collection_enabled": true,
+    "publication_enabled": true
+  },
+  "tests": {
+    "passed": 78,
+    "failed": 0,
+    "skipped": 0,
+    "command": "PROXY_TEST_DATABASE=1 PYTHONPATH=vendor .venv/bin/python -m unittest discover -s tests -v",
+    "coverage": [
+      "concurrent queue claims and URL ordering",
+      "parallel import deduplication and latest observations",
+      "proxy IDs and all 15 supported transports",
+      "statistics and escaped connection settings",
+      "atomic rollback and lost-acknowledgement recovery",
+      "publication barriers and queued shutdown recovery",
+      "backup restore and identity sequence"
+    ]
+  },
+  "queue_selection": {
+    "candidate_jobs": 94583,
+    "before_median_milliseconds": 167.25697899528313,
+    "after_median_milliseconds": 0.006333502824418247,
+    "measurement": "SELECT-only benchmark on an isolated copy of the same queue; excludes transaction/fsync time"
+  },
+  "live_before": {
+    "start_at": "2026-10-04T06:07:31.655606+00:00",
+    "end_at": "2026-10-04T06:16:34.165950+00:00",
+    "completed_sources": 79,
+    "seconds": 542.510344,
+    "sources_per_minute": 8.737160595042958,
+    "inserted_and_refreshed_rows_per_minute": 14635.186384575185
+  },
+  "live_after": {
+    "start_at": "2026-10-04T06:47:56.088887+00:00",
+    "end_at": "2026-10-04T06:52:07.811977+00:00",
+    "completed_sources": 164,
+    "seconds": 251.68817615509033,
+    "sources_per_minute": 39.09599628524698,
+    "inserted_rows": 14701,
+    "refreshed_rows": 302907,
+    "inserted_and_refreshed_rows_per_minute": 75714.64139124831,
+    "pipeline_errors": 0,
+    "source_http_404s": 2
+  },
+  "observed_speedup": {
+    "completed_sources": 4.474679829901279,
+    "inserted_and_refreshed_rows": 5.173466152166539
+  },
+  "compression_fixture": [
+    {
+      "compression": "3",
+      "snapshot_seconds": 3.2041424170020036,
+      "dump_bytes": 4564686,
+      "rows": 34829,
+      "restore_verified": true
+    },
+    {
+      "compression": "zstd:1",
+      "snapshot_seconds": 2.658142082989798,
+      "dump_bytes": 3857646,
+      "rows": 34829,
+      "restore_verified": true
+    }
+  ],
+  "live_recovery": [
+    {
+      "url": "https://raw.githubusercontent.com/myominn062-svg/mk-studio-vpn-service/main/subscription-vless.txt",
+      "state": "imported",
+      "error": null,
+      "updated_at": "2026-10-04T06:50:31.310294+00:00"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Epodonios/v2ray-configs/refs/heads/main/Sub7.txt",
+      "state": "imported",
+      "error": null,
+      "updated_at": "2026-10-04T06:48:00.089074+00:00"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/6b3478/telegram-configs-collector2/main/splitted/subscribe",
+      "state": "imported",
+      "error": null,
+      "updated_at": "2026-10-04T06:48:11.518462+00:00"
+    }
+  ],
+  "publication": {
+    "tag": "catalog-20261004T063153Z-hourly-4207c0",
+    "configurations": 6376050,
+    "new_since_previous_publication": 50527,
+    "published_at": "2026-10-04T06:48:48Z",
+    "uses_previous_compression": true
+  },
+  "measurement_limits": [
+    "The live windows contain different source sizes and overlap; these are observed rates, not a fixed-workload guarantee.",
+    "The final window includes recovery of cached downloads and excludes the hourly snapshot barrier.",
+    "Inserted/refreshed row counts include repeated observations of an existing proxy across different sources.",
+    "The faster compression was verified by restoring the isolated 34,829-proxy fixture; the hourly snapshot already in progress used the previous compression."
+  ]
+}
