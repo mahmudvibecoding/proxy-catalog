@@ -1,0 +1,142 @@
+{
+  "verified_at": "2026-10-04T04:20:28.828055+00:00",
+  "implementation_commit": "e8c74d1525de6db305dddcf639122431929f14a3",
+  "unit_and_integration_tests_passed": 68,
+  "postgres_tests_enabled": true,
+  "test_command": "PROXY_TEST_DATABASE=1 PYTHONPATH=vendor .venv/bin/python -m unittest discover -s tests -v",
+  "test_log_sha256": "064c6cd1016b32417f18ee367b76e2e256a0e1ae309116f74ea52df0e436dc45",
+  "live_pilot": {
+    "at": "2026-10-04T03:46:13.789268+00:00",
+    "sources_imported": 4,
+    "new_configurations": 2,
+    "existing_observations_refreshed": 68,
+    "live_replay_preserved_records_and_ids": true,
+    "live_replay_preserved_source_timestamps": true,
+    "live_replay_preserved_identity_sequence": true,
+    "live_replay_preserved_receipt_counters": true
+  },
+  "queue_benchmark": {
+    "at": "2026-10-04T04:04:20.446794+00:00",
+    "candidates": 90825,
+    "intake_seconds": 1.5180455000081565,
+    "claim_seconds_mean": 0.12464245625160401,
+    "claim_seconds_max": 0.1317827919992851,
+    "claims": 20
+  },
+  "release": {
+    "tag": "catalog-20261004T035442Z-hourly-993d2f",
+    "release_id": 402818693,
+    "seed": false,
+    "created_at": "2026-10-04T04:02:39.816770+00:00",
+    "assets_verified_at": "2026-10-04T04:03:56.172019+00:00",
+    "url": "https://github.com/mahmudvibecoding/proxy-catalog/releases/tag/catalog-20261004T035442Z-hourly-993d2f",
+    "manifest_sha256": "5ef3d882452607546eeb7ddf1ba4e66bdb81a4d829bda1b88976770922b362fd",
+    "metadata_pushed_at": "2026-10-04T04:15:40.425779+00:00",
+    "commit": "160caec2fa4c18d461cd3498e25ba4df74ef457c"
+  },
+  "full_download": {
+    "verified_at": "2026-10-04T04:05:44.956690+00:00",
+    "tag": "catalog-20261004T035442Z-hourly-993d2f",
+    "dump_sha256": "3b98ab27cf57864935e6e789df0b12387d81a3516b9fd2460d9f3046869c707f"
+  },
+  "full_restore": {
+    "verified_at": "2026-10-04T04:15:34.389524+00:00",
+    "database": "proxy_catalog_verify_3b98ab27cf57",
+    "tables": {
+      "proxies": {
+        "rows": 6184649,
+        "content_fingerprint": "-187072303714731685646"
+      },
+      "proxy_stats": {
+        "rows": 6184647,
+        "content_fingerprint": "9636625132136993365451"
+      },
+      "proxy_lists": {
+        "rows": 11059,
+        "content_fingerprint": "1275514682025999178956"
+      },
+      "identity_sequence": {
+        "last_value": 65165930,
+        "is_called": true
+      }
+    },
+    "dump_sha256": "3b98ab27cf57864935e6e789df0b12387d81a3516b9fd2460d9f3046869c707f",
+    "kept": false
+  },
+  "temporary_restore_database_removed": true,
+  "live_discovery_reload": {
+    "at": "2026-10-04T04:15:41.433314+00:00",
+    "run_id": "20261003T074719Z-122ab0",
+    "session": "01a100bb-60ad-75b1-b5d1-faba7bf6c2cb",
+    "same_session_resumed": true,
+    "candidate_urls_preserved": true,
+    "candidate_urls_before": 90825,
+    "candidate_urls_after": 90825,
+    "old_processes_stopped": true,
+    "new_parent_pid": 61880,
+    "new_child_pid": 61913,
+    "postgres_not_restarted": true,
+    "continuous_config_enabled": true,
+    "worker_services_installed": false
+  },
+  "research_progress_observed_after_reload": true,
+  "schedule": {
+    "enabled": true,
+    "intake_seconds": 300,
+    "publish_seconds": 3600,
+    "retry_seconds": 300,
+    "terminal_retry_seconds": 86400,
+    "retain_hourly": 24,
+    "local_snapshots": 2
+  },
+  "services": {
+    "collect": {
+      "label": "com.mahmud.proxy-catalog.collect",
+      "loaded": true,
+      "run_at_load": true,
+      "check_seconds": 60
+    },
+    "publish": {
+      "label": "com.mahmud.proxy-catalog.publish",
+      "loaded": true,
+      "run_at_load": true,
+      "check_seconds": 60
+    }
+  },
+  "queue_at_verification": {
+    "states": {
+      "imported": 123,
+      "leased": 23,
+      "pending": 90663,
+      "retry": 16
+    },
+    "candidates": 90825,
+    "inserted": 63556,
+    "refreshed": 151284,
+    "revision": 124,
+    "inputs": [
+      {
+        "run_id": "20261003T074719Z-122ab0",
+        "signature": "[91489092, 90389496, 1791085987585538946]",
+        "sha256": "cc6e9810adf0f5bcd7076059ce31656262cadb29d58a48085c3606a0cfe45447",
+        "candidates": 90825,
+        "read_at": "2026-10-04T04:16:40.623271+00:00"
+      }
+    ]
+  },
+  "next_publication_eligible_at": "2026-10-04T05:15:40.433425+00:00",
+  "retention": {
+    "initial_seed": true,
+    "hourly": 24,
+    "distinct_publication_days": 7,
+    "weeks": 4,
+    "completed_local_packages": 2,
+    "unfinished_publications_preserved": true
+  },
+  "scope_notes": {
+    "first_release_contains_small_live_pilot": true,
+    "full_collection_running": true,
+    "remaining_candidates_not_claimed_complete": true,
+    "new_worker_mac_reboot_tested": false
+  }
+}
