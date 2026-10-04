@@ -237,8 +237,12 @@ class Store:
                     with gzip.open(copy_path, 'rb') as f:
                         while block := f.read(1024 * 1024):
                             cp.write(block)
+                # Autovacuum cannot analyze temporary tables. Without current batch
+                # statistics the planner can scan the entire multi-million-row catalog.
+                self.writer.execute('ANALYZE proxy_stage')
                 inserted = self.writer.execute('''SELECT count(*) AS n FROM proxy_stage s
-                    LEFT JOIN proxies p USING(connection_key) WHERE p.proxy_id IS NULL''').fetchone()['n']
+                    WHERE NOT EXISTS (SELECT 1 FROM proxies p
+                                      WHERE p.connection_key=s.connection_key)''').fetchone()['n']
                 changed = self.writer.execute('''INSERT INTO proxies
                     (connection_key,address,port,connection_settings,last_seen_at)
                     SELECT connection_key,address,port,connection_settings,%s FROM proxy_stage

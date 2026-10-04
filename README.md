@@ -74,6 +74,8 @@ the default uses half the available CPUs, capped at four. One database writer
 reuses its connections and streams prepared COPY data. Imports and publication
 still share the same commit barrier and recovery receipts. Download concurrency
 and per-host limits remain configurable independently.
+Each staged batch is analyzed before counting new keys, allowing PostgreSQL to
+use indexed lookups instead of repeatedly scanning the full proxy catalog.
 
 ## Daily behavior
 

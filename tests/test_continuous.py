@@ -402,6 +402,33 @@ worker.apply_download(c,j,job,json.loads(job['result']))
         self.assertEqual(len(self.snapshot()['sources']), 5)
         self.assertLess(max(b - a for a, b in zip(ticks, ticks[1:])), 0.075)
 
+    def test_reused_writer_counts_overlapping_batches_and_preserves_newer_observations(self):
+        importer = worker.Importer(self.c, self.journal)
+        self.addCleanup(importer.close)
+        def payload(start, stop):
+            return ''.join(f'http://8.8.{i // 256}.{i % 256}:8080\n' for i in range(start, stop))
+        first = self.result(payload(0, 2000))
+        outcome = importer.apply(self.job, first)
+        self.assertEqual((outcome['inserted'], outcome['refreshed']), (2000, 0))
+        ids = {r['connection_key']: r['proxy_id'] for r in self.snapshot()['proxies']}
+        row = json.loads(self.job['body'])
+        self.journal.enqueue('next', [row], 'b', 'b')
+        second = self.result(payload(1000, 2500))
+        second['finished_at'] = first['finished_at'] + timedelta(seconds=1)
+        outcome = importer.apply(self.journal.claim(), second)
+        self.assertEqual((outcome['inserted'], outcome['refreshed']), (500, 1000))
+        before = self.snapshot()['proxies']
+        self.journal.enqueue('older', [row], 'c', 'c')
+        older = self.result(payload(1200, 1201))
+        older['finished_at'] = first['finished_at'] - timedelta(seconds=1)
+        outcome = importer.apply(self.journal.claim(), older)
+        self.assertEqual((outcome['inserted'], outcome['refreshed']), (0, 0))
+        after = self.snapshot()['proxies']
+        self.assertEqual(before, after)
+        self.assertEqual(len(after), 2500)
+        self.assertTrue(all(r['proxy_id'] == ids[r['connection_key']] for r in after if r['connection_key'] in ids))
+        self.assertEqual(self.journal.stats()['inserted'], 2500)
+
 
 def time_in_future():
     return datetime.now(timezone.utc).timestamp() + 100000
