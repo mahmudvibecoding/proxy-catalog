@@ -19,6 +19,7 @@
     "publish_seconds": 3600,
     "retry_seconds": 300,
     "terminal_retry_seconds": 86400,
+    "parse_workers": 4,
     "retain_hourly": 24,
     "local_snapshots": 2
   }

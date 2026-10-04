@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import struct
 import time
 from urllib.parse import urljoin, urlsplit
 import uuid
@@ -60,9 +61,57 @@ def format_hint_for_url(url):
     return Path(urlsplit(url).path).suffix.lower().removeprefix('.') or None
 
 
-def parsed_cache_path(version, checksum, hints):
+def parsed_cache_path(version, checksum, hints, storage=None):
     key = hashlib.sha256(canonical_json([version, checksum, hints]).encode()).hexdigest()
-    return STORAGE / 'parsed' / (key + '.jsonl.gz')
+    return Path(storage or STORAGE) / 'parsed' / (key + '.jsonl.gz')
+
+
+def parsed_cache(result, storage=None):
+    """Parse without opening a database connection; safe in a spawned worker."""
+    cache = parsed_cache_path(PARSER_VERSION, result['content_sha256'], result['protocol_hints'], storage)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    if not cache.exists():
+        with gzip.open(result['payload_path'], 'rb') as f:
+            parsed = parse_proxies(f.read(), result['protocol_hints'], result.get('content_type', ''))
+        temp = cache.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+        try:
+            with gzip.open(temp, 'wt', encoding='utf-8', compresslevel=3) as f:
+                f.write(canonical_json(parsed.summary()) + '\n')
+                for proxy in parsed.proxies.values():
+                    f.write(canonical_json(proxy.as_dict()) + '\n')
+            temp.replace(cache)
+        finally:
+            temp.unlink(missing_ok=True)
+    with gzip.open(cache, 'rt', encoding='utf-8') as f:
+        metrics = json.loads(next(f))
+    return cache, metrics
+
+
+def prepare_import(result, storage=None):
+    """Cache PostgreSQL COPY bytes so the writer only streams and commits them.
+
+    The versioned file contains four binary COPY fields: bytea, text, int4, jsonb.
+    JSONB's wire value starts with version byte 1 followed by UTF-8 JSON.
+    """
+    cache, metrics = parsed_cache(result, storage)
+    target = cache.with_suffix('.copy-v1.gz')
+    if metrics['unique_entries'] and not target.exists():
+        temp = target.with_suffix('.' + uuid.uuid4().hex + '.tmp')
+        try:
+            with gzip.open(cache, 'rt', encoding='utf-8') as source, gzip.open(temp, 'wb', compresslevel=1) as out:
+                out.write(b'PGCOPY\n\xff\r\n\0' + struct.pack('!ii', 0, 0))
+                next(source)
+                for line in source:
+                    row = json.loads(line)
+                    proxy = Proxy(row['address'], row['port'], row['protocol'], row['settings'])
+                    fields = (proxy.key, proxy.address.encode('utf-8'), struct.pack('!i', proxy.port),
+                              b'\x01' + canonical_json(pack_connection_settings(proxy.protocol, proxy.settings)).encode('utf-8'))
+                    out.write(struct.pack('!h', len(fields)) + b''.join(struct.pack('!i', len(v)) + v for v in fields))
+                out.write(struct.pack('!h', -1))
+            temp.replace(target)
+        finally:
+            temp.unlink(missing_ok=True)
+    return target
 
 
 def same_parsed_entries(left, right):
@@ -152,24 +201,7 @@ class Store:
         return ordered
 
     def parsed_cache(self, result):
-        hints = result['protocol_hints']
-        cache = parsed_cache_path(PARSER_VERSION, result['content_sha256'], hints)
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        if not cache.exists():
-            with gzip.open(result['payload_path'], 'rb') as f:
-                parsed = parse_proxies(f.read(), hints, result.get('content_type', ''))
-            temp = cache.with_suffix('.' + uuid.uuid4().hex + '.tmp')
-            try:
-                with gzip.open(temp, 'wt', encoding='utf-8', compresslevel=3) as f:
-                    f.write(canonical_json(parsed.summary()) + '\n')
-                    for proxy in parsed.proxies.values():
-                        f.write(canonical_json(proxy.as_dict()) + '\n')
-                temp.replace(cache)
-            finally:
-                temp.unlink(missing_ok=True)
-        with gzip.open(cache, 'rt', encoding='utf-8') as f:
-            metrics = json.loads(next(f))
-        return cache, metrics
+        return parsed_cache(result)
 
     def save(self, result):
         cache = None
@@ -199,15 +231,12 @@ class Store:
                         old_cache = parsed_cache_path(version, result['content_sha256'], result['protocol_hints'])
                         unchanged_entries = old_cache.exists() and same_parsed_entries(old_cache, cache)
             if cache and result['unique_entries'] and not unchanged_entries:
+                copy_path = prepare_import(result)
                 with self.writer.cursor().copy('''COPY proxy_stage
-                    (connection_key,address,port,connection_settings) FROM STDIN''') as cp:
-                    with gzip.open(cache, 'rt', encoding='utf-8') as f:
-                        next(f)
-                        for line in f:
-                            row = json.loads(line)
-                            proxy = Proxy(row['address'], row['port'], row['protocol'], row['settings'])
-                            cp.write_row((proxy.key, proxy.address, proxy.port,
-                                          stored_settings(proxy.settings, proxy.protocol)))
+                    (connection_key,address,port,connection_settings) FROM STDIN (FORMAT BINARY)''') as cp:
+                    with gzip.open(copy_path, 'rb') as f:
+                        while block := f.read(1024 * 1024):
+                            cp.write(block)
                 inserted = self.writer.execute('''SELECT count(*) AS n FROM proxy_stage s
                     LEFT JOIN proxies p USING(connection_key) WHERE p.proxy_id IS NULL''').fetchone()['n']
                 changed = self.writer.execute('''INSERT INTO proxies

@@ -67,6 +67,14 @@ current progress. Low free disk space pauses new collection or snapshot creation
 the last published release remains available. Existing research checkpoints are
 retained independently.
 
+Queue selection uses an index in processing order, and queue operations run off
+the download event loop. Up to four separate processes parse and prepare imports
+while downloads continue. Set `continuous.parse_workers` to tune this count;
+the default uses half the available CPUs, capped at four. One database writer
+reuses its connections and streams prepared COPY data. Imports and publication
+still share the same commit barrier and recovery receipts. Download concurrency
+and per-host limits remain configurable independently.
+
 ## Daily behavior
 
 The research LaunchAgent checks once a minute. When the signed-in user is at an unlocked, awake display and the internet is available, it starts the day's research run. The timezone is Asia/Tashkent. Later wakes do not repeat a completed day's research. An unfinished research run is resumed, and a process lock prevents overlap. Several missed days produce one current research run. Collection and publication have their own schedules.

@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 import gzip
@@ -8,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import uuid
@@ -16,6 +18,7 @@ from psycopg import sql
 import catalog
 import continuous as worker
 import publication
+from proxy_formats import Proxy, canonical_json, pack_connection_settings
 from common import config, db, pg_env, pg_tool, read_json, write_json
 
 
@@ -89,6 +92,30 @@ class JournalTests(unittest.TestCase):
         self.journal.finish(failed, {'status': 'http_404'}, retry_seconds=300, error='http_404')
         following = self.journal.claim()
         self.assertNotEqual(failed['url'], following['url'])
+
+    def test_cached_retry_preserves_url_order_and_retry_deadline(self):
+        self.journal.enqueue('run', [self.row()], 'a', 'a')
+        first = self.journal.claim()
+        cached = {'status': 'downloaded', 'content_sha256': 'saved'}
+        self.journal.finish(first, cached, retry_seconds=300)
+        self.journal.enqueue('run', [self.row(hints=['http']), self.row('https://another.test/list')], 'b', 'b')
+        other = self.journal.claim()
+        self.assertEqual(other['url'], 'https://another.test/list')
+        self.assertIsNone(self.journal.claim())
+        replay = self.journal.claim(at=time_in_future())
+        self.assertEqual(replay['id'], first['id'])
+        self.journal.finish(replay, dict(cached, status='collected', continuous_receipt='saved'), imported=True)
+        self.assertEqual(json.loads(self.journal.claim()['body'])['protocol_hints'], ['http'])
+
+    def test_concurrent_claims_do_not_duplicate_jobs(self):
+        self.journal.enqueue('run', [self.row(f'https://example.test/{i}') for i in range(30)], 'a', 'a')
+        second = worker.Journal(self.journal.home)
+        self.addCleanup(second.close)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda i: (self.journal if i % 2 else second).claim(), range(40)))
+        claimed = [r for r in results if r]
+        self.assertEqual(len(claimed), 30)
+        self.assertEqual(len({r['id'] for r in claimed}), 30)
 
     def test_import_barrier_excludes_another_process(self):
         script = 'import sys; from pathlib import Path; import continuous;\nwith continuous.import_guard(Path(sys.argv[1])): print("entered",flush=True)'
@@ -308,6 +335,72 @@ worker.apply_download(c,j,job,json.loads(job['result']))
         worker.apply_download(self.c, self.journal, self.job, self.result('<html>not a proxy list</html>'))
         self.assertEqual(self.snapshot()['sources'], [])
         self.assertEqual(self.journal.stats()['revision'], 0)
+
+    def test_binary_copy_preserves_every_transport_and_escaped_options(self):
+        transports = ['unknown', 'http', 'https', 'socks4', 'socks5', 'shadowsocks', 'shadowsocksr',
+                      'vmess', 'vless', 'trojan', 'hysteria', 'hysteria2', 'tuic', 'wireguard', 'ssh']
+        proxies = [Proxy('2606:4700:4700::1111' if i % 2 else '8.8.8.8', 1000 + i, transport,
+                         {'username': 'é\t\\', 'password': 'line\n\x00quote"',
+                          'nested': {'zero\x00': [True, False, None, 1, 1.5]}})
+                   for i, transport in enumerate(transports)]
+        result = self.result()
+        # Exercise the persisted parser-cache contract for all database transports.
+        cache = worker.collector.parsed_cache_path(worker.collector.PARSER_VERSION, result['content_sha256'], result['protocol_hints'])
+        summary = {'entries_found': len(proxies), 'unique_entries': len(proxies),
+                   'duplicates_in_list': 0, 'invalid_entries': 0, 'warnings': {}}
+        with gzip.open(cache, 'wt', encoding='utf-8') as out:
+            out.write(canonical_json(summary) + '\n')
+            for proxy in proxies:
+                out.write(canonical_json(proxy.as_dict()) + '\n')
+        cache.with_suffix('.copy-v1.gz').unlink(missing_ok=True)
+        try:
+            worker.apply_download(self.c, self.journal, self.job, result)
+            rows = self.snapshot()['proxies']
+            expected = {p.key: (p.address, p.port, pack_connection_settings(p.protocol, p.settings)) for p in proxies}
+            actual = {bytes(r['connection_key']): (r['address'], r['port'], r['connection_settings']) for r in rows}
+            self.assertEqual(actual, expected)
+            self.assertEqual(len(rows), len(transports))
+        finally:
+            cache.unlink(missing_ok=True)
+            cache.with_suffix('.copy-v1.gz').unlink(missing_ok=True)
+
+    def test_parallel_pipeline_respects_limit_reuses_writer_and_keeps_loop_responsive(self):
+        self.journal.finish(self.job, {'status': 'test_setup'})
+        rows = [{'url': f'https://example.test/feed/{i}', 'kind': 'feed_candidate',
+                 'protocol_hints': ['http']} for i in range(12)]
+        self.journal.enqueue('research', rows, 'b', 'b')
+        payload = self.result('http://9.9.9.9:9090\n')
+        class Downloader:
+            def __init__(self, options): self.client = self
+            async def aclose(self): pass
+            async def fetch(self, row):
+                await asyncio.sleep(0.01)
+                return dict(payload, list_url=row['list_url'])
+        original_claim = self.journal.claim
+        ticks = []
+        def slow_claim():
+            time.sleep(0.08)
+            return original_claim()
+        async def scenario():
+            async def heartbeat():
+                for _ in range(15):
+                    ticks.append(time.monotonic())
+                    await asyncio.sleep(0.02)
+            pulse = asyncio.create_task(heartbeat())
+            outcome = await worker.collect(dict(self.c, concurrency=8, continuous={'parse_workers': 2}),
+                                           self.journal, limit=5, once=True)
+            await pulse
+            return outcome
+        with patch.object(worker.collector, 'Downloader', Downloader), \
+             patch.object(self.journal, 'claim', side_effect=slow_claim), \
+             patch.object(worker.collector, 'Store', wraps=worker.collector.Store) as stores:
+            outcome = asyncio.run(scenario())
+        self.assertEqual(outcome['finished'], 5)
+        self.assertEqual(outcome['states'], {'empty': 1, 'imported': 5, 'pending': 7})
+        self.assertEqual(stores.call_count, 1)
+        self.assertEqual(outcome['inserted'], 1)
+        self.assertEqual(len(self.snapshot()['sources']), 5)
+        self.assertLess(max(b - a for a, b in zip(ticks, ticks[1:])), 0.075)
 
 
 def time_in_future():

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
 import gzip
 import hashlib
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import plistlib
@@ -37,6 +38,7 @@ def settings(c):
     return {'enabled': False, 'intake_seconds': 300, 'publish_seconds': 3600,
             'retry_seconds': 300, 'terminal_retry_seconds': 86400,
             'retain_hourly': 24, 'local_snapshots': 2, 'min_free_bytes': 3 * 1024**3,
+            'parse_workers': max(1, min(4, (os.cpu_count() or 2) // 2)),
             'max_source_bytes': 256 * 1024**2, **c.get('continuous', {})}
 
 
@@ -73,6 +75,9 @@ class Journal:
                 error TEXT,updated_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS jobs_ready ON jobs(state,retry_at,attempts);
             CREATE INDEX IF NOT EXISTS jobs_url ON jobs(url,state);
+            CREATE INDEX IF NOT EXISTS jobs_claim ON jobs(
+                CASE WHEN json_extract(result,'$.status') IN ('downloaded','downloaded_partial')
+                    THEN 0 ELSE 1 END,attempts) WHERE state IN ('pending','retry');
             CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY,job_id TEXT NOT NULL,
                 inserted INTEGER NOT NULL,refreshed INTEGER NOT NULL,applied_at TEXT NOT NULL);
         ''')
@@ -135,7 +140,9 @@ class Journal:
 
     def claim(self, at=None):
         with self.transaction() as conn:
-            row = conn.execute("""SELECT * FROM jobs j WHERE state IN ('pending','retry') AND retry_at<=?
+            # Traverse ready jobs in priority order instead of sorting the entire backlog.
+            row = conn.execute("""SELECT * FROM jobs j INDEXED BY jobs_claim
+                WHERE state IN ('pending','retry') AND retry_at<=?
                 AND NOT EXISTS(SELECT 1 FROM jobs x WHERE x.url=j.url AND x.state='leased')
                 AND NOT EXISTS(SELECT 1 FROM jobs x WHERE x.url=j.url AND x.id<>j.id
                     AND x.state IN ('pending','retry') AND x.rowid<j.rowid
@@ -241,7 +248,7 @@ def configure_collector(c):
         (collector.STORAGE / sub).mkdir(parents=True, exist_ok=True)
 
 
-def apply_download(c, journal, job, downloaded):
+def apply_download(c, journal, job, downloaded, store=None):
     """PG receipt and source data commit together; an unacknowledged commit replays once."""
     result = dict(downloaded)
     row = json.loads(job['body'])
@@ -249,11 +256,13 @@ def apply_download(c, journal, job, downloaded):
         result['finished_at'] = datetime.fromisoformat(result['finished_at'])
     receipt_id = hashlib.sha256((job['id'] + '\0' + result.get('content_sha256','') + '\0' +
                     result.get('finished_at', datetime.now(timezone.utc)).isoformat()).encode()).hexdigest()
-    store = collector.Store(acquire_lock=False)
+    owned = store is None
     try:
         if result['status'] not in ('downloaded', 'downloaded_partial'):
             journal.finish(job, result, retry_seconds=settings(c)['retry_seconds'], error=result['status'])
             return result
+        if store is None:
+            store = collector.Store(acquire_lock=False)
         _, metrics = store.parsed_cache(result)
         if not metrics['unique_entries'] or metrics.get('warnings', {}).get('html_response'):
             result['status'] = 'no_valid_entries'
@@ -286,31 +295,58 @@ def apply_download(c, journal, job, downloaded):
                            retry_seconds=settings(c)['retry_seconds'] if result['status']=='collected_partial' else None)
         return result
     finally:
-        store.close()
+        if owned and store is not None:
+            store.close()
+
+
+class Importer:
+    """One writer connection reused on the import executor's sole thread."""
+    def __init__(self, c, journal):
+        self.c, self.journal, self.store = c, journal, None
+
+    def apply(self, job, result):
+        try:
+            if result['status'] in ('downloaded', 'downloaded_partial') and self.store is None:
+                self.store = collector.Store(acquire_lock=False)
+            return apply_download(self.c, self.journal, job, result, self.store)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        if self.store is not None:
+            self.store.close()
+            self.store = None
 
 
 async def collect(c, journal, limit=None, once=False):
     configure_collector(c)
-    journal.recover()
+    await asyncio.to_thread(journal.recover)
     options = argparse.Namespace(concurrency=c['concurrency'], per_host=c['per_host'],
         github_concurrency=c['github_concurrency'], retries=c['retries'], max_bytes=settings(c)['max_source_bytes'])
     downloader = collector.Downloader(options)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='proxy-import')
+    parsers = ProcessPoolExecutor(max_workers=settings(c)['parse_workers'],
+                                  mp_context=multiprocessing.get_context('spawn'))
+    importer = Importer(c, journal)
+    claim_lock = asyncio.Lock()
     claimed = finished = 0
     waiting_for_space = False
     stopping = asyncio.Event()
 
     async def monitor():
         while not stopping.is_set():
-            write_json(journal.home / 'collector-status.json',
+            stats = await asyncio.to_thread(journal.stats)
+            await asyncio.to_thread(write_json, journal.home / 'collector-status.json',
                        {'at': now(), 'pid': os.getpid(), 'state': 'running', 'finished_this_process': finished,
-                        **journal.stats()})
-            if not once and time.time() - journal.get('last_intake_at', 0) >= settings(c)['intake_seconds']:
+                        'parse_workers': settings(c)['parse_workers'], **stats})
+            last_intake = await asyncio.to_thread(journal.get, 'last_intake_at', 0)
+            if not once and time.time() - last_intake >= settings(c)['intake_seconds']:
                 try:
                     await asyncio.to_thread(intake_current, journal)
                 except (OSError, ValueError, RuntimeError) as exc:
                     write_json(journal.home / 'intake-error.json', {'at': now(), 'error': str(exc)})
-                    journal.set('last_intake_at', time.time())
+                    await asyncio.to_thread(journal.set, 'last_intake_at', time.time())
             await asyncio.sleep(10)
 
     async def worker():
@@ -323,10 +359,13 @@ async def collect(c, journal, limit=None, once=False):
                            'free_bytes': shutil.disk_usage(collector.STORAGE).free, 'state': 'waiting_for_disk_space'})
                 return
             (journal.home / 'storage-wait.json').unlink(missing_ok=True)
-            job = journal.claim()
-            if job is None:
-                return
-            claimed += 1
+            async with claim_lock:
+                if limit is not None and claimed >= limit:
+                    return
+                job = await asyncio.to_thread(journal.claim)
+                if job is None:
+                    return
+                claimed += 1
             result = {}
             try:
                 saved = json.loads(job['result']) if job['result'] else None
@@ -335,16 +374,19 @@ async def collect(c, journal, limit=None, once=False):
                 else:
                     row = json.loads(job['body'])
                     result = await downloader.fetch({'list_url': row['url'], 'protocol_hints': row['protocol_hints']})
-                    journal.downloaded(job, result)
-                future = asyncio.get_running_loop().run_in_executor(executor, apply_download, c, journal, job, result)
+                    await asyncio.to_thread(journal.downloaded, job, result)
+                loop = asyncio.get_running_loop()
+                if result['status'] in ('downloaded', 'downloaded_partial'):
+                    await loop.run_in_executor(parsers, collector.prepare_import, result, str(collector.STORAGE))
+                future = loop.run_in_executor(executor, importer.apply, job, result)
                 try:
                     await asyncio.shield(future)
                 except asyncio.CancelledError:
                     await future
                     raise
-            except (OSError, ValueError, RuntimeError) as exc:
+            except (OSError, ValueError, RuntimeError, collector.psycopg.Error) as exc:
                 # Keep downloaded pages when an import fails; retries can replay the PG receipt.
-                journal.finish(job, result,
+                await asyncio.to_thread(journal.finish, job, result,
                                retry_seconds=settings(c)['retry_seconds'], error=type(exc).__name__ + ': ' + str(exc)[:300])
             finished += 1
 
@@ -358,6 +400,8 @@ async def collect(c, journal, limit=None, once=False):
         reporter.cancel()
         await asyncio.gather(reporter, return_exceptions=True)
         await downloader.client.aclose()
+        await asyncio.to_thread(parsers.shutdown, wait=True, cancel_futures=True)
+        await asyncio.get_running_loop().run_in_executor(executor, importer.close)
         executor.shutdown(wait=True)
         write_json(journal.home / 'collector-status.json',
                    {'at': now(), 'pid': os.getpid(), 'state': 'waiting_for_disk_space' if waiting_for_space else 'idle', 'finished_this_process': finished,
