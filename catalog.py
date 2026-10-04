@@ -65,16 +65,18 @@ def stop_discovery_child(child):
     except subprocess.TimeoutExpired:
         child.kill(); child.wait(timeout=5)
 
-def source_records(c, full=False):
+def source_records(c, full=False, connection=None):
     columns='*' if full else 'url,kind,protocol_hints,enabled,status,fetched_at'
+    if connection is not None:
+        return connection.execute(f'SELECT {columns} FROM proxy_lists ORDER BY url').fetchall()
     with db(c) as connection:
         return connection.execute(f'SELECT {columns} FROM proxy_lists ORDER BY url').fetchall()
 
-def archive_sources(c, path):
+def archive_sources(c, path, connection=None):
     path=Path(path)
     temp=path.with_suffix(path.suffix+'.partial')
     with gzip.open(temp,'wt',encoding='utf-8',compresslevel=3) as f:
-        for row in source_records(c,full=True):
+        for row in source_records(c,full=True,connection=connection):
             f.write(json.dumps(row,default=str,ensure_ascii=False)+'\n')
     temp.replace(path)
 
@@ -308,6 +310,17 @@ def pipeline(c,folder,record):
             record.pop('discovery_error',None)
             record['issues']=[x for x in record['issues'] if x!='discovery_incomplete']
         stage('discovery',research)
+        if c.get('continuous',{}).get('enabled'):
+            import continuous
+            def handoff():
+                journal=continuous.Journal()
+                try: continuous.intake(journal,folder,force=True)
+                finally: journal.close()
+            stage('continuous_handoff',handoff)
+            record.update(stage='completed',finished_at=now(),collection_continues_independently=True)
+            write_json(folder/'run.json',record)
+            return {'catalog_after':totals(c)['count'],'research_complete':True,
+                    'collection_continues_independently':True}
         stage('validation',lambda:asyncio.run(validate_candidates(c,folder)))
         stage('source_import',lambda:add_sources(c,read_json(folder/'validation.json',[])))
         stage('collection',lambda:collect(c,folder,record))
@@ -401,6 +414,9 @@ def install(c):
     state.pop('disabled',None); write_json(STATE,state)
     subprocess.run(['/bin/launchctl','bootout',f'gui/{os.getuid()}/{LABEL}'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     run(['/bin/launchctl','bootstrap',f'gui/{os.getuid()}',path])
+    if c.get('continuous',{}).get('enabled'):
+        import continuous
+        continuous.install(c)
     print(json.dumps({'installed':str(path),'interval_seconds':60,'model':c['model'],'effort':c['reasoning_effort'],'deadline':None}))
 
 def disable():
@@ -408,6 +424,8 @@ def disable():
     subprocess.run(['/bin/launchctl','bootout',f'gui/{os.getuid()}/{LABEL}'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     path=Path.home()/'Library/LaunchAgents'/f'{LABEL}.plist'
     if path.exists(): path.rename(LOCAL/'disabled-launchagent.plist')
+    import continuous
+    continuous.disable()
     print('Automatic runs disabled; all checkpoints and snapshots retained.')
 
 def main():

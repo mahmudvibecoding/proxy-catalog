@@ -36,6 +36,7 @@ DOWNLOAD_COLUMNS = (
     'content_type', 'decoded_bytes', 'received_body_bytes', 'content_sha256', 'payload_path',
     'entries_found', 'unique_entries', 'duplicates_in_list', 'invalid_entries',
     'parser_details', 'error_type', 'elapsed_seconds',
+    'continuous_receipt', 'receipt_inserted', 'receipt_refreshed',
 )
 
 
@@ -79,12 +80,12 @@ def same_parsed_entries(left, right):
 
 
 class Store:
-    def __init__(self):
+    def __init__(self, acquire_lock=True):
         self.control = connection()
         identity = self.control.execute('SELECT current_database() AS db, current_user AS usr').fetchone()
         if identity != {'db': DB['dbname'], 'usr': DB['user']}:
             raise RuntimeError('Unexpected database')
-        locked = self.control.execute(
+        locked = not acquire_lock or self.control.execute(
             "SELECT pg_try_advisory_lock(hashtextextended('proxy:proxy_collection',0)) AS locked"
         ).fetchone()['locked']
         if not locked:
@@ -157,7 +158,7 @@ class Store:
         if not cache.exists():
             with gzip.open(result['payload_path'], 'rb') as f:
                 parsed = parse_proxies(f.read(), hints, result.get('content_type', ''))
-            temp = cache.with_suffix('.tmp')
+            temp = cache.with_suffix('.' + uuid.uuid4().hex + '.tmp')
             try:
                 with gzip.open(temp, 'wt', encoding='utf-8', compresslevel=3) as f:
                     f.write(canonical_json(parsed.summary()) + '\n')
@@ -187,6 +188,7 @@ class Store:
         with self.writer.transaction():
             self.writer.execute('TRUNCATE proxy_stage')
             unchanged_entries = False
+            inserted = refreshed = 0
             if result.get('reparse') and cache:
                 previous = self.writer.execute('SELECT fetch_state,fetched_at FROM proxy_lists WHERE run_id=%s AND url=%s',
                                                (self.run_id,result['list_url'])).fetchone()
@@ -206,14 +208,19 @@ class Store:
                             proxy = Proxy(row['address'], row['port'], row['protocol'], row['settings'])
                             cp.write_row((proxy.key, proxy.address, proxy.port,
                                           stored_settings(proxy.settings, proxy.protocol)))
-                self.writer.execute('''INSERT INTO proxies
+                inserted = self.writer.execute('''SELECT count(*) AS n FROM proxy_stage s
+                    LEFT JOIN proxies p USING(connection_key) WHERE p.proxy_id IS NULL''').fetchone()['n']
+                changed = self.writer.execute('''INSERT INTO proxies
                     (connection_key,address,port,connection_settings,last_seen_at)
                     SELECT connection_key,address,port,connection_settings,%s FROM proxy_stage
                     ON CONFLICT (connection_key) DO UPDATE SET
                         last_seen_at=GREATEST(proxies.last_seen_at,excluded.last_seen_at)
                     WHERE excluded.last_seen_at > proxies.last_seen_at''', (observed,))
+                refreshed = changed.rowcount - inserted
             # Membership history is intentionally absent. Reparsing can add corrected
             # configurations but cannot prove an old one is safe to delete.
+            if result.get('continuous_receipt'):
+                result.update(receipt_inserted=inserted, receipt_refreshed=refreshed)
             state = {key: result.get(key) for key in DOWNLOAD_COLUMNS
                      if key not in ('status','finished_at') and result.get(key) is not None}
             state = json.loads(json.dumps(state, default=lambda value: value.isoformat()))
@@ -222,7 +229,8 @@ class Store:
                 (result['status'],observed,Jsonb(state),self.run_id,result['list_url']))
             if updated.rowcount != 1:
                 raise RuntimeError('Current list record missing; proxy observations rolled back')
-        return {'status': result['status'], 'unique_entries': result.get('unique_entries', 0) or 0}
+        return {'status': result['status'], 'unique_entries': result.get('unique_entries', 0) or 0,
+                'inserted': inserted, 'refreshed': refreshed}
 
     def progress(self):
         rows = self.control.execute('SELECT status,count(*) AS n FROM proxy_lists WHERE run_id=%s GROUP BY status ORDER BY status',
@@ -350,7 +358,7 @@ class Downloader:
     async def fetch_one(self, row):
         result = {'list_url': row['list_url'], 'protocol_hints': row['protocol_hints'],
                   'attempts': 0, 'received_body_bytes': 0}
-        filename = hashlib.sha256(row['list_url'].encode()).hexdigest() + '.part.gz'
+        filename = hashlib.sha256(row['list_url'].encode()).hexdigest() + '.' + uuid.uuid4().hex + '.part.gz'
         temp = STORAGE / 'tmp' / filename
         start = time.monotonic()
         result['started_at'] = now()

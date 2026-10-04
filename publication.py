@@ -34,6 +34,8 @@ def make_snapshot(c, folder, report):
             with connection.transaction():
                 connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
                 connection.execute("SET LOCAL TIME ZONE 'UTC'")
+                if callable(report):
+                    report = report(connection)
                 snapshot = connection.execute('SELECT pg_export_snapshot() AS id').fetchone()['id']
                 backup = out / 'catalog.dump'
                 temp = out / 'catalog.dump.partial'
@@ -53,7 +55,7 @@ def make_snapshot(c, folder, report):
             part.write_bytes(block)
             assets.append({'name':name, 'bytes':part.stat().st_size, 'sha256':digest(part), 'role':'database'})
             index += 1
-    for name in ('sources-before.jsonl.gz', 'source-results.jsonl.gz', 'candidates.json', 'validation.json'):
+    for name in ('sources-before.jsonl.gz', 'source-results.jsonl.gz', 'candidates.json', 'validation.json', 'intake-results.jsonl.gz'):
         source = folder / name
         if source.exists():
             target = out / name
@@ -211,19 +213,33 @@ def commit_publication(c, folder, journal, report):
         own_pending=(count=='1' and message==f'Publish proxy catalog {folder.name}' and
                      all(p.startswith(('sources/','reports/')) or p=='latest.json' for p in changed))
         if not own_pending: raise RuntimeError('Local code and origin/main differ; update the checkout before publishing')
+        latest = read_json(ROOT/'latest.json',{})
+        if latest.get('tag') != tag or latest.get('manifest_sha256') != journal['manifest_sha256']:
+            raise RuntimeError('Pending publication metadata does not match this snapshot')
+        # Retry the existing commit; changing published_at here would create another
+        # unpushed commit and prevent the next recovery attempt from recognizing it.
+        run(['git','push','origin','HEAD:main'],cwd=ROOT)
+        journal.update(metadata_pushed_at=now(),commit=head)
+        write_json(folder/'publication.json',journal)
+        return latest
     if release_record(c,tag)['draft']:
         gh(c,'release','edit',tag,'--repo',c['repository'],'--draft=false','--latest')
     registry = read_json(folder/'registry.json')
     if registry is not None:
         write_json(ROOT/'sources/registry.json',registry)
-    history = read_json(ROOT/'sources/discovery-history.json',[])
-    if not any(x['run_id']==folder.name for x in history):
-        history.append({'run_id':folder.name,'summary':report.get('research_summary'),
-                        'validation':read_json(folder/'validation.json',[])})
-    write_json(ROOT/'sources/discovery-history.json',history)
+    if report.get('kind') != 'hourly_refresh':
+        history = read_json(ROOT/'sources/discovery-history.json',[])
+        if not any(x['run_id']==folder.name for x in history):
+            history.append({'run_id':folder.name,'summary':report.get('research_summary'),
+                            'validation':read_json(folder/'validation.json',[])})
+        write_json(ROOT/'sources/discovery-history.json',history)
     write_json(ROOT/'reports'/f'{folder.name}.json',report)
     latest = {'tag':tag,'url':journal['url'],'manifest_sha256':journal['manifest_sha256'],
               'configurations':report['catalog_after'],'published_at':now(),'seed':journal.get('seed',False)}
+    if report.get('kind') == 'hourly_refresh':
+        latest.update(new_configurations=report['new_configurations'],
+                      research_in_progress=any(not r['complete'] for r in report['research']),
+                      pending_sources=report['pending_sources'],retry_sources=report['retry_sources'])
     write_json(ROOT/'latest.json',latest)
     staged = capture(['git','diff','--cached','--name-only'],cwd=ROOT).splitlines()
     if any(not (p.startswith('sources/') or p.startswith('reports/') or p=='latest.json') for p in staged):
@@ -235,6 +251,24 @@ def commit_publication(c, folder, journal, report):
     journal.update(metadata_pushed_at=now(),commit=capture(['git','rev-parse','HEAD'],cwd=ROOT).strip())
     write_json(folder/'publication.json',journal)
     return latest
+
+def retained_tags(c, candidates, current_tag):
+    from zoneinfo import ZoneInfo
+    zone=ZoneInfo(c['timezone'])
+    keep={current_tag}
+    keep.update(r['tag_name'] for r in candidates[:c.get('continuous',{}).get('retain_hourly',0)])
+    days=set(); weeks=set()
+    for item in candidates:
+        if item['name'].startswith('Initial seed:'):
+            keep.add(item['tag_name'])
+        at=datetime.fromisoformat(item['published_at'].replace('Z','+00:00')).astimezone(zone)
+        day=at.date().isoformat(); week=at.strftime('%G-%V')
+        if day not in days and len(days)<c['retain_daily']:
+            days.add(day); keep.add(item['tag_name'])
+        if week not in weeks and len(weeks)<c['retain_weekly']:
+            weeks.add(week); keep.add(item['tag_name'])
+    return keep
+
 
 def prune(c, current_tag):
     """Retention only touches verified catalog releases created by this runner."""
@@ -250,15 +284,7 @@ def prune(c, current_tag):
     candidates=[r for r in records if r['tag_name'] in managed and not r['draft']
                 and any(a['name']=='manifest.json' for a in r['assets'])]
     candidates.sort(key=lambda r:r['published_at'],reverse=True)
-    keep={current_tag}
-    keep.update(r['tag_name'] for r in candidates[:c['retain_daily']])
-    weekly=set()
-    for r in candidates:
-        if r['name'].startswith('Initial seed:'):
-            keep.add(r['tag_name'])
-        week=datetime.fromisoformat(r['published_at'].replace('Z','+00:00')).strftime('%G-%V')
-        if week not in weekly and len(weekly)<c['retain_weekly']:
-            weekly.add(week); keep.add(r['tag_name'])
+    keep=retained_tags(c,candidates,current_tag)
     for r in candidates:
         if r['tag_name'] not in keep:
             gh(c,'release','delete',r['tag_name'],'--repo',c['repository'],'--yes')

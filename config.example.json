@@ -12,5 +12,14 @@
   "retries": 2,
   "chunk_bytes": 536870912,
   "retain_daily": 7,
-  "retain_weekly": 4
+  "retain_weekly": 4,
+  "continuous": {
+    "enabled": true,
+    "intake_seconds": 300,
+    "publish_seconds": 3600,
+    "retry_seconds": 300,
+    "terminal_retry_seconds": 86400,
+    "retain_hourly": 24,
+    "local_snapshots": 2
+  }
 }
