@@ -551,7 +551,8 @@ def install(c):
         label = LABEL + '.' + role
         path = Path.home() / 'Library/LaunchAgents' / (label + '.plist')
         data = {'Label': label, 'ProgramArguments': [str(ROOT / '.venv/bin/python'), str(ROOT / 'continuous.py'), role, '--check'],
-            'WorkingDirectory': str(ROOT), 'RunAtLoad': True, 'StartInterval': 60, 'ProcessType': 'Background',
+            'WorkingDirectory': str(ROOT), 'RunAtLoad': True, 'StartInterval': 60,
+            'ProcessType': 'Standard' if role == 'collect' else 'Background',
             'StandardOutPath': str(WORK / (role + '.log')), 'StandardErrorPath': str(WORK / (role + '-error.log')),
             'EnvironmentVariables': {'PATH': '/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin'},
             'AbandonProcessGroup': False, 'ExitTimeOut': 30}

@@ -140,7 +140,10 @@ class Store:
         if not locked:
             raise RuntimeError('Another proxy collector is already running')
         self.writer = connection()
-        self.writer.execute("SET lock_timeout = '30s'")
+        # Ordered concurrent upserts can legitimately wait behind a large feed.
+        # Keep those waits instead of repeatedly rolling back the same overlap.
+        timeout = '0' if not acquire_lock and self.writer.info.server_version >= 180000 else '30s'
+        self.writer.execute(f"SET lock_timeout = '{timeout}'")
         self.writer.execute('''CREATE TEMP TABLE proxy_stage (
             connection_key BYTEA PRIMARY KEY, address TEXT, port INTEGER,
             connection_settings JSONB
