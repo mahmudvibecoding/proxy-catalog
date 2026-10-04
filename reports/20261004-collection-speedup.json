@@ -42,19 +42,23 @@
   },
   "live_after": {
     "start_at": "2026-10-04T06:47:56.088887+00:00",
-    "end_at": "2026-10-04T06:52:07.811977+00:00",
-    "completed_sources": 164,
-    "seconds": 251.68817615509033,
-    "sources_per_minute": 39.09599628524698,
-    "inserted_rows": 14701,
-    "refreshed_rows": 302907,
-    "inserted_and_refreshed_rows_per_minute": 75714.64139124831,
-    "pipeline_errors": 0,
-    "source_http_404s": 2
+    "end_at": "2026-10-04T06:55:45.400500+00:00",
+    "completed_sources": 344,
+    "seconds": 469.31148505210876,
+    "sources_per_minute": 43.979320040949546,
+    "inserted_rows": 16599,
+    "refreshed_rows": 629233,
+    "inserted_and_refreshed_rows_per_minute": 82567.59366478641,
+    "retry_errors": [
+      {
+        "error": "http_404",
+        "n": 3
+      }
+    ]
   },
   "observed_speedup": {
-    "completed_sources": 4.474679829901279,
-    "inserted_and_refreshed_rows": 5.173466152166539
+    "completed_sources": 5.03359410217334,
+    "inserted_and_refreshed_rows": 5.641717945718058
   },
   "compression_fixture": [
     {
@@ -104,5 +108,17 @@
     "The final window includes recovery of cached downloads and excludes the hourly snapshot barrier.",
     "Inserted/refreshed row counts include repeated observations of an existing proxy across different sources.",
     "The faster compression was verified by restoring the isolated 34,829-proxy fixture; the hourly snapshot already in progress used the previous compression."
-  ]
+  ],
+  "live_after_early": {
+    "start_at": "2026-10-04T06:47:56.088887+00:00",
+    "end_at": "2026-10-04T06:52:07.811977+00:00",
+    "completed_sources": 164,
+    "seconds": 251.68817615509033,
+    "sources_per_minute": 39.09599628524698,
+    "inserted_rows": 14701,
+    "refreshed_rows": 302907,
+    "inserted_and_refreshed_rows_per_minute": 75714.64139124831,
+    "pipeline_errors": 0,
+    "source_http_404s": 2
+  }
 }

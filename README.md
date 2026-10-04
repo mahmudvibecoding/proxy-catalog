@@ -194,7 +194,7 @@ into the live catalog.
 The [October 4 throughput verification](reports/20261004-collection-speedup.json)
 records 78 passing tests, concurrent import/recovery checks, and a complete
 restore of the faster compressed backup. In the measured live windows, completed
-sources increased from 8.7 to 39.1 per minute. Source sizes vary; the report keeps
+sources increased from 8.7 to 44.0 per minute. Source sizes vary; the report keeps
 the timings, row counts, and measurement limits alongside this comparison.
 
 Run `.venv/bin/python tests/pilot_recovery.py` for the explicit recovery pilot. It sends SIGTERM to an isolated runner with a fake research CLI, verifies session/candidate preservation and duplicate exclusion, and resumes it to the validation boundary. It also creates a temporary PostgreSQL cluster and temporary LaunchAgent, verifies adoption of an already running server, startup after absence, clean shutdown, and restart, then removes its test service and cluster. It never stops the live database or invokes the real research model. Receipts are saved under `.local/recovery-pilot/`. A real reboot or sleep/wake cycle is verified through the installed LaunchAgents' subsequent run records; fixture checks alone do not prove that event.
