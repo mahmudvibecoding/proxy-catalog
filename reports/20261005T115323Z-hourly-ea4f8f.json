@@ -1,0 +1,39 @@
+{
+  "run_id": "20261005T115323Z-hourly-ea4f8f",
+  "kind": "hourly_refresh",
+  "created_at": "2026-10-05T11:53:57.182691+00:00",
+  "catalog_before": 12197272,
+  "new_configurations": 295,
+  "catalog_after": 12197567,
+  "candidates": 128740,
+  "validated_sources": 118172,
+  "pending_sources": 351,
+  "retry_sources": 9765,
+  "superseded_sources": 452,
+  "revision": 118290,
+  "research": [
+    {
+      "run_id": "20261003T074719Z-122ab0",
+      "stage": "discovery",
+      "session": "01a100bb-60ad-75b1-b5d1-faba7bf6c2cb",
+      "complete": false,
+      "candidate_checkpoint_at": "2026-10-05T11:52:52.337165+00:00",
+      "candidates": 128127
+    }
+  ],
+  "research_summary": {
+    "completion_status": "incomplete"
+  },
+  "proxy_testing": "stopped",
+  "collection": {
+    "source_states": {
+      "imported": 118172,
+      "leased": 1,
+      "pending": 350,
+      "retry": 9765,
+      "superseded": 452
+    },
+    "inserted_since_worker_start": 6012920,
+    "refreshed_since_worker_start": 137809591
+  }
+}
