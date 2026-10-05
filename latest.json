@@ -1,12 +1,12 @@
 {
-  "tag": "catalog-20261005T224030Z-hourly-7db3d6",
-  "url": "https://github.com/mahmudvibecoding/proxy-catalog/releases/tag/catalog-20261005T224030Z-hourly-7db3d6",
-  "manifest_sha256": "83ec0cd48fa8e074fdf0ecbde16a93f716d59a41385e2ad8d7d71c86acc7b1bb",
-  "configurations": 13369224,
-  "published_at": "2026-10-05T22:48:43.329746+00:00",
+  "tag": "catalog-20261005T234947Z-hourly-36cca8",
+  "url": "https://github.com/mahmudvibecoding/proxy-catalog/releases/tag/catalog-20261005T234947Z-hourly-36cca8",
+  "manifest_sha256": "b4c163dfa2a6cc0ba9d9446132ebcb140279af92590227ff66e5c211f5f70cda",
+  "configurations": 13381141,
+  "published_at": "2026-10-05T23:58:50.343063+00:00",
   "seed": false,
-  "new_configurations": 44262,
+  "new_configurations": 11917,
   "research_in_progress": true,
-  "pending_sources": 79,
-  "retry_sources": 12441
+  "pending_sources": 14,
+  "retry_sources": 12216
 }
