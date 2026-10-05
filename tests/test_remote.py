@@ -22,6 +22,8 @@ class RemoteTests(unittest.TestCase):
         self.assertIn('ForwardAgent=no', command)
         self.assertIn('BatchMode=yes', command)
         self.assertNotIn('-A', command)
+        self.assertIn('research python', command[-1])
+        self.assertIn('worker python', remote.ssh_command(self.c, ['python'])[-1])
         self.assertIn("'print(\"literal; $(nothing)\")'", command[-1])
         for host in ('root@host;touch /tmp/x', '-oProxyCommand=x', 'root@host\ncommand'):
             with self.assertRaises(ValueError):

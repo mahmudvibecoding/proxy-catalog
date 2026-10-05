@@ -41,6 +41,19 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+  research:
+    build:
+      context: .
+      dockerfile: Dockerfile.research
+    restart: unless-stopped
+    volumes:
+      - .:/work
+    mem_limit: 32g
+    stop_grace_period: 5m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 secrets:
   database_password:
     file: ./secrets/database_password

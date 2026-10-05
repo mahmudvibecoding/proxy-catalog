@@ -103,8 +103,11 @@ Linux worker:
 }
 ```
 
-The worker runs `compose.worker.yaml`: an isolated PostgreSQL 18 database and a
-Python container. It owns the collection queue, public downloads, parsing,
+The worker runs `compose.worker.yaml`: an isolated PostgreSQL 18 database, a
+collection container, and a Python 3.14 research container. Research uses Python
+3.14's standard-library Zstandard reader for its existing archives. Separate
+containers keep a large research job from exhausting the collector's memory.
+The server owns the collection queue, public downloads, parsing,
 imports, research evidence and bulk helpers, and backup/restore work. The Mac
 runs the authenticated OpenAI research session and GitHub publication. Code and
 selected task data travel over SSH with agent forwarding disabled. Account auth
