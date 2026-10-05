@@ -31,7 +31,7 @@ def ssh_command(c, arguments, *, research=None):
         if not re.fullmatch(r'[a-zA-Z0-9_-]+', research):
             raise ValueError('Invalid research run')
         command += ['-w', '/work/.local/runs/' + research + '/research']
-    command += ['worker', *map(str, arguments)]
+    command += ['research' if research else 'worker', *map(str, arguments)]
     return ['ssh', *SSH_OPTIONS, remote['host'],
             'cd ' + shlex.quote(remote['directory']) + ' && ' + shlex.join(command)]
 

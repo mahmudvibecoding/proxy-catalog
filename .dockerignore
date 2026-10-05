@@ -1,3 +1,4 @@
 *
 !Dockerfile.worker
+!Dockerfile.research
 !requirements.txt
