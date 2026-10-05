@@ -77,6 +77,8 @@ def pg_env(c, dbname=None):
     env = os.environ.copy()
     for key, pgkey in [('dbname','PGDATABASE'),('user','PGUSER'),('host','PGHOST'),('port','PGPORT')]:
         env[pgkey] = str(c['database'][key])
+    if c['database'].get('password'):
+        env['PGPASSWORD'] = c['database']['password']
     if dbname:
         env['PGDATABASE'] = dbname
     env['PROXY_STORAGE'] = c.get('storage', str(LOCAL / 'proxy-collection'))

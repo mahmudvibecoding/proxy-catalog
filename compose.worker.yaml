@@ -1,0 +1,46 @@
+name: proxy-catalog-worker
+services:
+  db:
+    image: postgres:18.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: proxy_catalog
+      POSTGRES_DB: proxy_catalog
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets:
+      - database_password
+    ports:
+      - "127.0.0.1:55442:5432"
+    volumes:
+      - ./postgres:/var/lib/postgresql
+    command: ["postgres", "-c", "shared_buffers=8GB", "-c", "effective_cache_size=40GB", "-c", "maintenance_work_mem=1GB", "-c", "max_parallel_workers=24", "-c", "max_parallel_workers_per_gather=4", "-c", "max_wal_size=8GB", "-c", "checkpoint_timeout=15min", "-c", "wal_compression=zstd"]
+    mem_limit: 48g
+    shm_size: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proxy_catalog -d proxy_catalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/work
+    mem_limit: 32g
+    shm_size: 1g
+    stop_grace_period: 5m
+    environment:
+      PYTHONUNBUFFERED: "1"
+      GIT_TERMINAL_PROMPT: "0"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+secrets:
+  database_password:
+    file: ./secrets/database_password

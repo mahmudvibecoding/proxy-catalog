@@ -73,9 +73,12 @@ while downloads continue. Set `continuous.parse_workers` to tune this count;
 the default uses half the available CPUs, capped at four. Four database workers
 (`continuous.import_workers`) reuse their connections and stream prepared COPY
 data. On PostgreSQL 18+, imports can commit concurrently; writes follow connection
-key order to prevent deadlocks. Publication takes an exclusive barrier until
-every active import and its recovery receipt are committed. Download concurrency
-and per-host limits remain configurable independently.
+key order to prevent deadlocks. Publication briefly takes an exclusive barrier
+to capture matching PostgreSQL data and queue receipts, then releases imports
+while the backup and fingerprints read that frozen snapshot. Because PostgreSQL
+sequences are not frozen by MVCC, the manifest records the sequence value saved
+inside the dump. Restore verification checks that exact value. Download
+concurrency and per-host limits remain configurable independently.
 The collection and publication LaunchAgents use normal macOS process priority
 so background CPU and disk throttling do not stall imports or backups while
 research is running.
@@ -83,9 +86,46 @@ On PostgreSQL 18 and later, inserted/refreshed counts come from the upsert itsel
 eliminating a separate catalog lookup. Earlier versions analyze each staged batch
 and count new keys using indexed lookups.
 Snapshots use fast lossless Zstandard compression on PostgreSQL 18+ (gzip level 1
-on earlier versions), reducing time spent holding the import barrier. Override
+on earlier versions). Override
 `snapshot_compression` if the installed PostgreSQL tools require another method.
 The same checksums, table fingerprints, sequence checks, and restore audits apply.
+
+## Server processing with authentication on the Mac
+
+An optional `remote` section in the Mac's `config.local.json` selects a separate
+Linux worker:
+
+```json
+"remote": {
+  "host": "root@worker.example.com",
+  "directory": "/opt/proxy-catalog-worker",
+  "research_on_server": true
+}
+```
+
+The worker runs `compose.worker.yaml`: an isolated PostgreSQL 18 database and a
+Python container. It owns the collection queue, public downloads, parsing,
+imports, research evidence and bulk helpers, and backup/restore work. The Mac
+runs the authenticated OpenAI research session and GitHub publication. Code and
+selected task data travel over SSH with agent forwarding disabled. Account auth
+files, browser profiles, session logs, and private keys are excluded. The database
+gets a new service-specific password generated on the server.
+
+The existing Mac collection LaunchAgent becomes a small synchronization job.
+Research helpers run through `research_remote.py`; the authoritative research
+data stays on the server. The Mac accesses PostgreSQL through a loopback SSH
+tunnel. Server collection continues when the Mac disconnects; new OpenAI
+research and GitHub publication resume when the Mac is available. Hourly
+publication requests the heavy snapshot on the server, checks transferred
+assets, and authenticates to GitHub locally. Weekly restore audits run on the
+server against the same SHA-256 verified in the downloaded GitHub backup.
+
+For a migration, stop only this catalog's writers, preserve the original local
+state, take a consistent database dump and SQLite queue backup, and transfer
+saved pending payloads. Restore into a new server database and compare all
+fingerprints and sequence values before starting its worker. Never run both
+collectors against independent copies of the queue. Do not remove the local
+rollback copy as part of the cutover.
 
 ## Daily behavior
 

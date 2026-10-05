@@ -7,13 +7,34 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
+import time
+from contextlib import nullcontext
 from datetime import datetime
 from psycopg import sql
 from common import ROOT, LOCAL, capture, db, digest, gh, gh_api, now, pg_env, pg_tool, read_json, run, table_metrics, write_json
 
 TAG_PREFIX = 'catalog-'
 
-def make_snapshot(c, folder, report):
+def dump_identity_sequence(c, backup, major, sequence):
+    """Read the sequence value saved by pg_dump; sequences are not MVCC data."""
+    restore = pg_tool(c, 'pg_restore', major)
+    entries = [line for line in capture([restore, '--list', backup]).splitlines()
+               if ' SEQUENCE SET ' in line
+               and line.split(' SEQUENCE SET ', 1)[1].split()[:2] == sequence.split('.')]
+    if len(entries) != 1:
+        raise RuntimeError('Backup must contain exactly one proxy identity sequence')
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.list') as selected:
+        selected.write(entries[0] + '\n')
+        selected.flush()
+        script = capture([restore, '--use-list', selected.name, '--file=-', backup])
+    values = re.findall(r"^SELECT pg_catalog\.setval\('[^']+', (-?\d+), (true|false)\);$", script, re.MULTILINE)
+    if len(values) != 1:
+        raise RuntimeError('Could not read the backed-up proxy identity sequence')
+    return {'last_value': int(values[0][0]), 'is_called': values[0][1] == 'true'}
+
+
+def make_snapshot(c, folder, report, snapshot_guard=nullcontext):
     folder = Path(folder)
     out = folder / 'snapshot'
     out.mkdir(exist_ok=True)
@@ -28,25 +49,34 @@ def make_snapshot(c, folder, report):
         size = connection.execute('SELECT pg_database_size(current_database()) AS n').fetchone()['n']
         if shutil.disk_usage(out).free < max(3 * 1024**3, size * 2):
             raise RuntimeError('Insufficient free disk space for snapshot and restore verification')
-        if not connection.execute("SELECT pg_try_advisory_lock(hashtextextended('proxy:proxy_collection',0)) AS ok").fetchone()['ok']:
-            raise RuntimeError('Another collector is active; retry snapshot later')
-        try:
-            with connection.transaction():
-                connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
-                connection.execute("SET LOCAL TIME ZONE 'UTC'")
-                if callable(report):
-                    report = report(connection)
-                snapshot = connection.execute('SELECT pg_export_snapshot() AS id').fetchone()['id']
-                backup = out / 'catalog.dump'
-                temp = out / 'catalog.dump.partial'
-                compression = c.get('snapshot_compression', 'zstd:1' if connection.info.server_version >= 180000 else '1')
-                run([pg_tool(c,'pg_dump',connection.info.server_version//10000), '--format=custom', '--compress=' + compression, '--no-owner', '--no-acl',
-                     '--snapshot', snapshot, '--file', temp], env=pg_env(c), stdout=subprocess.DEVNULL)
-                metrics = table_metrics(connection)
-                temp.replace(backup)
-                server_version = connection.execute('SHOW server_version').fetchone()['server_version']
-        finally:
-            connection.execute("SELECT pg_advisory_unlock(hashtextextended('proxy:proxy_collection',0))")
+        with connection.transaction():
+            connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+            connection.execute("SET LOCAL TIME ZONE 'UTC'")
+            with snapshot_guard():
+                paused_at = time.monotonic()
+                if not connection.execute("SELECT pg_try_advisory_lock(hashtextextended('proxy:proxy_collection',0)) AS ok").fetchone()['ok']:
+                    raise RuntimeError('Another collector is active; retry snapshot later')
+                try:
+                    if callable(report):
+                        report = report(connection)
+                    snapshot = connection.execute('SELECT pg_export_snapshot() AS id').fetchone()['id']
+                finally:
+                    connection.execute("SELECT pg_advisory_unlock(hashtextextended('proxy:proxy_collection',0))")
+                pause_seconds = time.monotonic() - paused_at
+            # Keep the MVCC snapshot open, while allowing new imports to commit.
+            # The report and SQLite receipts were captured inside the same barrier.
+            write_json(out / 'snapshot-boundary.json', {'imports_resumed_at': now(),
+                       'import_pause_seconds': round(pause_seconds, 3)})
+            backup = out / 'catalog.dump'
+            temp = out / 'catalog.dump.partial'
+            compression = c.get('snapshot_compression', 'zstd:1' if connection.info.server_version >= 180000 else '1')
+            run([pg_tool(c,'pg_dump',connection.info.server_version//10000), '--format=custom', '--compress=' + compression, '--no-owner', '--no-acl',
+                 '--snapshot', snapshot, '--file', temp], env=pg_env(c), stdout=subprocess.DEVNULL)
+            metrics = table_metrics(connection)
+            sequence = connection.execute("SELECT pg_get_serial_sequence('public.proxies','proxy_id') AS name").fetchone()['name']
+            metrics['identity_sequence'] = dump_identity_sequence(c, temp, connection.info.server_version // 10000, sequence)
+            temp.replace(backup)
+            server_version = connection.execute('SHOW server_version').fetchone()['server_version']
     assets = []
     with backup.open('rb') as source:
         index = 0
@@ -65,9 +95,10 @@ def make_snapshot(c, folder, report):
     write_json(out / 'report.json', report)
     assets.append({'name':'report.json','bytes':(out/'report.json').stat().st_size,'sha256':digest(out/'report.json'),'role':'report'})
     manifest = {'format_version':1, 'created_at':now(), 'run_id':folder.name, 'repository':c['repository'],
-                'code_commit':capture(['git','rev-parse','HEAD'],cwd=ROOT).strip(),
+                'code_commit':c.get('code_commit') or capture(['git','rev-parse','HEAD'],cwd=ROOT).strip(),
                 'postgres_version':server_version, 'database_bytes':size, 'tables':metrics,
                 'compression':compression,
+                'import_pause_seconds':round(pause_seconds, 3),
                 'dump_sha256':digest(backup), 'dump_bytes':backup.stat().st_size, 'assets':assets,
                 'cache_policy':'Source payload and parser caches remain local; restore starts fresh downloads. Source records and run evidence are included.'}
     write_json(out/'manifest.json',manifest)

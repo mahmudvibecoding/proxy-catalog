@@ -3,4 +3,6 @@
 __pycache__/
 *.pyc
 config.local.json
+secrets/
+postgres/
 .DS_Store

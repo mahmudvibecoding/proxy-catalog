@@ -74,7 +74,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(read_json(research/'candidates.json'),data)
         validate.assert_not_called(); collect.assert_not_called()
 
-    def discovery(self, completed=True, status='complete', exit_code=0, fresh=True):
+    def discovery(self, completed=True, status='complete', exit_code=0, fresh=True, clock_skew=False):
         workspace=self.root/'research'; workspace.mkdir(exist_ok=True)
         (workspace/'.git').mkdir(exist_ok=True)
         write_json(workspace/'candidates.json',[{'url':'https://example.com/saved'}])
@@ -84,6 +84,7 @@ class RecoveryTests(unittest.TestCase):
         record={'discovery_session':'saved-session'}
         def child(*args,**kwargs):
             if fresh: write_json(summary,{'completion_status':status,'summary':'current'})
+            if clock_skew: os.utime(summary,(1,1))
             events=[{'type':'thread.started','thread_id':'saved-session'}]
             if completed: events.append({'type':'turn.completed','usage':{}})
             proc=Mock(pid=123,stdout=[json.dumps(x)+'\n' for x in events])
@@ -110,6 +111,10 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result['discovery_session'],'saved-session')
         self.assertEqual(result['research_summary']['summary'],'current')
         self.assertEqual(read_json(self.root/'candidates.json')[0]['url'],'https://example.com/saved')
+
+    def test_fresh_completion_handles_filesystem_or_remote_clock_skew(self):
+        result=self.discovery(clock_skew=True)
+        self.assertEqual(result['research_summary']['summary'],'current')
 
     def test_postgres_service_refuses_missing_cluster_without_creating_it(self):
         missing=self.root/'not-a-cluster'

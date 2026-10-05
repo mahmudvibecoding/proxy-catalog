@@ -168,7 +168,7 @@ class PublicationTests(unittest.TestCase):
         latest = self.root / 'latest.json'
         write_json(latest, {'tag': 'old', 'configurations': 10})
         snapshots = []
-        def snapshot(c, folder, report):
+        def snapshot(c, folder, report, **kwargs):
             snapshots.append(folder.name)
             write_json(folder / 'snapshot/manifest.json', {'assets': []})
             write_json(folder / 'report.json', {'revision': 1, 'catalog_after': 12, 'new_configurations': 2})
@@ -558,6 +558,50 @@ worker.apply_download(c,j,job,json.loads(job['result']))
         manifest = publication.make_snapshot(dict(self.c, chunk_bytes=1024), folder, {'kind': 'test'})
         self.assertEqual(manifest['tables']['proxies']['rows'], 2)
         self.assertEqual(manifest['tables']['proxy_stats']['rows'], 2)
+        proof = publication.restore_verify(self.c, folder / 'snapshot')
+        self.assertEqual(proof['tables'], manifest['tables'])
+
+    def test_snapshot_allows_imports_during_dump_and_restores_the_captured_state(self):
+        worker.apply_download(self.c, self.journal, self.job, self.result())
+        with db(self.c) as conn:
+            conn.execute('INSERT INTO proxy_stats(proxy_id,connection_attempts,last_connection_attempt_at) SELECT proxy_id,7,now() FROM proxies')
+        row = {'url': 'https://example.test/after-snapshot', 'kind': 'feed_candidate', 'protocol_hints': ['http']}
+        self.journal.enqueue('during-backup', [row], 'b', 'b')
+        job = self.journal.claim()
+        result = dict(self.result('http://1.1.1.1:8081\n'), list_url=row['url'])
+        worker.collector.prepare_import(result)
+        folder = self.folder / 'concurrent-snapshot'
+        folder.mkdir()
+        original_run = publication.run
+        observed = {}
+        def report(connection):
+            with self.journal.snapshot():
+                return {'revision': self.journal.stats()['revision'],
+                        'catalog_after': connection.execute('SELECT count(*) AS n FROM proxies').fetchone()['n']}
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            def run_with_import(args, **kwargs):
+                if Path(args[0]).name == 'pg_dump':
+                    # This must finish while pg_dump's exported snapshot remains open.
+                    imported = pool.submit(worker.apply_download, self.c, self.journal, job, result)
+                    observed['imported'] = imported.result(timeout=5)
+                    with db(self.c) as conn:
+                        conn.execute('UPDATE proxy_stats SET connection_attempts=9')
+                    outcome = original_run(args, **kwargs)
+                    with db(self.c) as conn:
+                        observed['dump_sequence'] = conn.execute('SELECT last_value,is_called FROM proxies_proxy_id_seq').fetchone()
+                        conn.execute("SELECT nextval('proxies_proxy_id_seq') FROM generate_series(1,10)")
+                    return outcome
+                return original_run(args, **kwargs)
+            with patch.object(publication, 'run', side_effect=run_with_import):
+                manifest = publication.make_snapshot(dict(self.c, chunk_bytes=1024), folder, report,
+                                                      snapshot_guard=lambda: worker.import_guard(self.folder))
+        self.assertEqual(observed['imported']['inserted'], 1)
+        self.assertEqual(len(self.snapshot()['proxies']), 2)
+        self.assertEqual(self.journal.stats()['revision'], 2)
+        self.assertEqual(read_json(folder / 'snapshot/report.json'), {'revision': 1, 'catalog_after': 1})
+        self.assertEqual(manifest['tables']['proxies']['rows'], 1)
+        self.assertEqual(manifest['tables']['proxy_lists']['rows'], 1)
+        self.assertEqual(manifest['tables']['identity_sequence'], observed['dump_sequence'])
         proof = publication.restore_verify(self.c, folder / 'snapshot')
         self.assertEqual(proof['tables'], manifest['tables'])
 

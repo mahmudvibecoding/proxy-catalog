@@ -442,7 +442,7 @@ def research_status(inputs):
 
 
 def prepare_publication(c, journal, folder, connection):
-    # Held until the snapshot is complete. Network discovery and downloads continue.
+    # Capture queue receipts and PostgreSQL data before releasing the import barrier.
     with journal.snapshot():
         queue = journal.stats()
         journal.export(folder / 'intake-results.jsonl.gz')
@@ -493,8 +493,12 @@ def publish(c, journal, force=False, restore_audit=False):
             write_json(folder / 'hourly.json', record)
 
         def snapshot():
-            with import_guard(journal.home):
-                publication.make_snapshot(c, folder, lambda connection: prepare_publication(c, journal, folder, connection))
+            if c.get('remote'):
+                import remote
+                remote.snapshot(c, folder)
+            else:
+                publication.make_snapshot(c, folder, lambda connection: prepare_publication(c, journal, folder, connection),
+                                          snapshot_guard=lambda: import_guard(journal.home))
 
         stage('snapshot', snapshot)
         manifest = read_json(folder / 'snapshot/manifest.json')
@@ -504,9 +508,17 @@ def publish(c, journal, force=False, restore_audit=False):
         week = datetime.now(timezone.utc).strftime('%G-%V')
         if restore_audit or state.get('last_restore_week') != week:
             stage('download_audit', lambda: publication.download(c, receipt['tag'], folder / 'downloaded', receipt['manifest_sha256']))
-            stage('restore_audit', lambda: publication.restore_verify(c, folder / 'downloaded'))
+            def restore():
+                if c.get('remote'):
+                    import remote
+                    return remote.restore(c, folder, folder / 'downloaded')
+                return publication.restore_verify(c, folder / 'downloaded')
+            stage('restore_audit', restore)
             state['last_restore_week'] = week
         stage('publish', lambda: publication.commit_publication(c, folder, receipt, report))
+        if c.get('remote'):
+            import remote
+            stage('ack_remote', lambda: remote.acknowledge(c, folder))
         state.update(last_publication=folder.name, last_published_epoch=time.time(),
                      published_revision=report['revision'])
         write_json(state_path, state)
@@ -593,13 +605,19 @@ def main():
         disable(); return
     if args.check and not enabled(c):
         return
-    journal = Journal()
+    if c.get('remote'):
+        import remote
+        journal = remote.Journal(c)
+    else:
+        journal = Journal()
     awake = None
     try:
         with catalog.shutdown_signals():
             if args.command == 'status':
                 value = {'queue': journal.stats(), 'collector': read_json(WORK / 'collector-status.json'),
                          'publisher': read_json(WORK / 'publisher-status.json'), 'publication': read_json(WORK / 'publication-state.json')}
+            elif c.get('remote') and args.command in ('intake', 'collect'):
+                value = remote.sync_research(c, args.run, args.force)
             elif args.command == 'intake':
                 with lock(WORK / 'collector.lock'):
                     value = intake(journal, args.run, args.force) if args.run else intake_current(journal, args.force)
