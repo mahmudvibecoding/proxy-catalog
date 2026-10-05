@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import remote
 import research_remote
+import remote_worker
 from common import write_json
 
 
@@ -64,6 +65,27 @@ class RemoteTests(unittest.TestCase):
             self.assertEqual(remote.restore(self.c, self.root / 'run-1', downloaded), proof)
         calling.assert_called_once_with(self.c, 'restore', '--run', 'run-1', '--checksum', 'frozen-backup')
         self.assertEqual(json.loads((downloaded / 'restore-verification.json').read_text()), proof)
+
+
+    def test_completion_does_not_download_bulk_research_files(self):
+        with patch.object(research_remote, 'capture', return_value='["research_summary.json"]'), \
+             patch.object(remote, 'copy_files') as copying:
+            research_remote.pull_core(self.c, self.root / 'run-1')
+        self.assertEqual(copying.call_args.kwargs['names'], ['research_summary.json'])
+        self.assertEqual(research_remote.CORE, ['research_summary.json'])
+
+    def test_server_validates_candidates_and_preserves_rejected_evidence(self):
+        workspace = self.root / 'runs/run-1/research'
+        write_json(workspace / 'candidates.json', [
+            {'url': 'https://example.com/feed'}, {'url': 'file:///private'},
+            {'url': 'https://example.com/feed'}])
+        with patch.object(remote_worker, 'LOCAL', self.root):
+            result = remote_worker.finish_research({}, 'run-1')
+            with self.assertRaises(ValueError):
+                remote_worker.finish_research({}, '../outside')
+        self.assertEqual(result, {'candidates': 1})
+        self.assertEqual(len(json.loads((workspace.parent / 'candidates.json').read_text())), 1)
+        self.assertEqual(len(json.loads((workspace / 'candidates.rejected.json').read_text())), 1)
 
 
 if __name__ == '__main__':

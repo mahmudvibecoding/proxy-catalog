@@ -10,7 +10,7 @@ import subprocess
 from common import ROOT, LOCAL, capture, config, run, write_json
 import remote
 
-CORE = ['candidates.json', 'research_summary.json', 'coverage.json', 'parser_gaps.json']
+CORE = ['research_summary.json']
 PRIVATE = {'auth.json', 'hosts.yml', 'config.local.json', 'events.jsonl', 'stderr.log', 'stdout.log',
            'id_rsa', 'id_ed25519', 'id_ecdsa', 'credentials.json', 'client_secret.json'}
 
@@ -46,10 +46,18 @@ def bootstrap(c, folder):
 
 
 def pull_core(c, folder):
+    """Only the small completion summary belongs on the authenticated Mac."""
     script = 'from pathlib import Path; import json; print(json.dumps([n for n in ' + repr(CORE) + ' if Path(n).is_file()]))'
     names = json.loads(capture(remote.ssh_command(c, ['python', '-c', script], research=folder.name)))
     if names:
         remote.copy_files(c, folder / 'research', '.local/runs/' + folder.name + '/research', download=True, names=names)
+
+
+def prepare(c, folder):
+    bootstrap(c, folder)
+    remote.copy_files(c, folder / 'research', '.local/runs/' + folder.name + '/research',
+                      names=['discovery_history.json'])
+    remote.call(c, 'research-prepare', '--run', folder.name)
 
 
 def remote_summary_signature(c, folder):
