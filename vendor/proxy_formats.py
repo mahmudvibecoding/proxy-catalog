@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import yaml
 
-PARSER_VERSION = 4
+PARSER_VERSION = 5
 ALIASES = {
     'socks': 'socks5', 'socks5h': 'socks5', 'socks4a': 'socks4',
     'ss': 'shadowsocks', 'ssr': 'shadowsocksr', 'hy': 'hysteria', 'hy2': 'hysteria2',
@@ -300,6 +300,30 @@ class Parser:
             return
         declared_kind = obj.get('protocol', obj.get('type'))
         if isinstance(declared_kind, str) and declared_kind in {'direct', 'block', 'dns', 'freedom', 'blackhole'}:
+            return
+        # The native paginated API uses rows of [IP, port, country, first_seen]
+        # and declares their protocol in the response envelope. Only accept a
+        # root response: nested examples/service metadata are not proxy lists.
+        if {'proto', 'rows', 'page', 'per', 'total', 'pages'}.issubset(obj):
+            if depth:
+                return
+            proto = protocol_name(obj['proto'])
+            if (proto not in {'http', 'https', 'socks4', 'socks5'}
+                    or not isinstance(obj['rows'], list)
+                    or any(type(obj[k]) is not int or obj[k] < minimum
+                           for k, minimum in (('page', 1), ('per', 1), ('total', 0), ('pages', 0)))):
+                self.result.warnings['invalid_compact_proxy_page'] += 1
+                return
+            for row in obj['rows']:
+                # Additional columns can carry connection options in other
+                # formats. Do not silently discard them or scan their values.
+                if (not isinstance(row, list) or len(row) != 4
+                        or not isinstance(row[0], str) or not isinstance(row[2], str)
+                        or type(row[3]) is not int):
+                    self.result.invalid['invalid_compact_row'] += 1
+                    continue
+                self.result.add(row[0], row[1], proto)
+            self.result.formats['compact_proxy_rows'] += 1
             return
         # A complete connect string carries credentials/transport options that
         # the accompanying address and port summary may omit.
