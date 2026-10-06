@@ -1,0 +1,33 @@
+{
+  "members": [
+    {
+      "name": "subscription/list.txt",
+      "body": "http://alice:p%40ss@8.8.8.8:8080\nvless://11111111-1111-4111-8111-111111111111@1.1.1.1:443?security=tls&type=ws&path=%2Fproxy&host=edge.publisher.net&sni=tls.publisher.net&x-option=keep#label\n"
+    },
+    {
+      "name": "native/client.yml",
+      "body": "proxies:\n  - name: display only\n    type: vmess\n    server: 9.9.9.9\n    port: 443\n    uuid: 22222222-2222-4222-8222-222222222222\n    alterId: 0\n    cipher: auto\n    tls: true\n    servername: tls.publisher.net\n    network: ws\n    ws-opts: {path: /ws, headers: {Host: edge.publisher.net}}\n    future-option: {mode: preserved}\ndns:\n  nameserver: [\"8.8.4.4:53\"]\nlisteners:\n  - {type: http, server: 8.8.4.4, port: 7890}\n"
+    },
+    {
+      "name": "native/client.json",
+      "body": "{\"outbounds\":[{\"type\":\"trojan\",\"tag\":\"display only\",\"server\":\"8.8.4.4\",\"server_port\":443,\"password\":\"sanitized-secret\",\"tls\":{\"enabled\":true,\"server_name\":\"tls.publisher.net\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"transport\":{\"type\":\"ws\",\"path\":\"/tunnel\",\"headers\":{\"Host\":\"edge.publisher.net\"}},\"future_option\":{\"mode\":\"preserved\"}},{\"type\":\"dns\",\"server\":\"1.1.1.1\",\"server_port\":53},{\"type\":\"direct\"}],\"inbounds\":[{\"type\":\"http\",\"server\":\"9.9.9.9\",\"port\":8080}]}"
+    },
+    {
+      "name": "checked.csv",
+      "body": "ip,port,protocol,username,password,country\n8.8.8.8,8080,http,alice,p@ss,US\n"
+    },
+    {
+      "name": "examples/client.json",
+      "body": "{\"type\":\"http\",\"server\":\"1.0.0.1\",\"port\":9999}"
+    },
+    {"name": "README.txt", "body": "Example: http://1.0.0.1:9999\n"},
+    {"name": "generate.py", "body": "raise RuntimeError('never execute')\n# http://1.0.0.1:9999\n"}
+  ],
+  "expected_entries_found": 5,
+  "expected": [
+    {"address": "8.8.8.8", "port": 8080, "protocol": "http", "settings": {"username": "alice", "password": "p@ss"}},
+    {"address": "1.1.1.1", "port": 443, "protocol": "vless", "settings": {"uuid": "11111111-1111-4111-8111-111111111111", "security": "tls", "type": "ws", "path": "/proxy", "host": "edge.publisher.net", "sni": "tls.publisher.net", "x-option": "keep"}},
+    {"address": "9.9.9.9", "port": 443, "protocol": "vmess", "settings": {"uuid": "22222222-2222-4222-8222-222222222222", "alterId": 0, "cipher": "auto", "tls": true, "servername": "tls.publisher.net", "network": "ws", "ws-opts": {"path": "/ws", "headers": {"Host": "edge.publisher.net"}}, "future-option": {"mode": "preserved"}}},
+    {"address": "8.8.4.4", "port": 443, "protocol": "trojan", "settings": {"password": "sanitized-secret", "tls": {"enabled": true, "server_name": "tls.publisher.net", "utls": {"enabled": true, "fingerprint": "chrome"}}, "transport": {"type": "ws", "path": "/tunnel", "headers": {"Host": "edge.publisher.net"}}, "future_option": {"mode": "preserved"}}}
+  ]
+}

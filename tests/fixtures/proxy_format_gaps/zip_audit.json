@@ -1,0 +1,542 @@
+{
+  "research_run": "20261003T074719Z-122ab0",
+  "baseline_commit": "87e4280641f664e6b77fa04fd0d1ff7485a17c0c",
+  "confirmed_format": "Root stored/DEFLATE ZIP archives of UTF-8 client configuration members, with explicit protocols or one unambiguous source hint.",
+  "scope": "All supported complete text members; existing complete connection keys match independently decoded version-5 member parses with unspecified protocols excluded.",
+  "counts": {
+    "verified_replay_urls": 403,
+    "examined_distinct_urls": 440,
+    "before_entries_found": 0,
+    "after_entries_found": 90886,
+    "before_union_connection_keys": 0,
+    "after_union_connection_keys": 30743,
+    "after_invalid_entries": 109,
+    "source_advertised_records": 89597,
+    "union_protocols": {
+      "vmess": 16319,
+      "shadowsocks": 6489,
+      "vless": 106,
+      "trojan": 5386,
+      "socks5": 1537,
+      "http": 155,
+      "socks4": 662,
+      "https": 44,
+      "wireguard": 45
+    },
+    "member_extensions_examined": {
+      ".yml": 405,
+      ".txt": 1478,
+      ".conf": 237,
+      ".md": 57,
+      ".json": 9,
+      ".py": 9,
+      "": 50,
+      ".png": 14,
+      ".jpg": 6,
+      ".html": 5,
+      ".js": 9,
+      ".css": 5,
+      ".yaml": 9,
+      ".apk": 1,
+      ".sh": 11,
+      ".strings": 19,
+      ".dylib": 20,
+      ".tiff": 5,
+      ".icns": 1,
+      ".nib": 7,
+      ".car": 1,
+      ".example": 1,
+      ".plist": 9,
+      ".zip": 1,
+      ".ico": 2,
+      ".jsonc": 1,
+      ".ts": 53,
+      ".csv": 18
+    },
+    "excluded_assessments": {
+      "archive_limits_require_review": 9,
+      "no_confirmed_gain": 22,
+      "missing_cached_body": 6
+    },
+    "before_parser_version": 5,
+    "after_parser_version": 6,
+    "baseline_parser_sha256": "513b87afd2e357d5ffebf6f181e9ef9f393f15a27422dbdf7196149af8f772cf",
+    "candidate_parser_sha256": "c064db121ffcbbca1776fa2a3757a9674307dbb315fbf15d2ec07a71185797d2",
+    "interpretation": "Cached source extraction counts and existing connection keys, not database imports or unique configuration growth. YAML and URI representations can describe the same configuration.",
+    "known_protocol_connection_keys": 30743,
+    "unknown_protocol_connection_keys": 0
+  },
+  "hosts": {
+    "raw.githubusercontent.com": 401,
+    "amirrezafarnamtaheri.github.io": 2
+  },
+  "samples": [
+    {
+      "url": "https://raw.githubusercontent.com/pojiezhiyuanjun/freev2/master/0101.zip",
+      "body_path": "http_evidence/01141ac73ec796e943912ceb-e24299479ab3bf76.body",
+      "bytes": 84942,
+      "sha256": "e24299479ab3bf765c20906b7c3d4958ef88d33294d84c06f630d73684a0db96",
+      "source_advertised_records": 155,
+      "before": {
+        "parser_version": 5,
+        "entries_found": 0,
+        "unique_entries": 0,
+        "duplicates_in_list": 0,
+        "invalid_entries": 46,
+        "invalid_reasons": {
+          "invalid_endpoint": 44,
+          "invalid_address_or_port": 2
+        },
+        "formats": {
+          "columns": 1,
+          "plain": 1
+        },
+        "warnings": {
+          "invalid_json_line": 7,
+          "no_supported_entries": 1
+        },
+        "protocols": {}
+      },
+      "after": {
+        "parser_version": 6,
+        "entries_found": 308,
+        "unique_entries": 289,
+        "duplicates_in_list": 19,
+        "invalid_entries": 0,
+        "invalid_reasons": {},
+        "formats": {
+          "zip_archive": 1,
+          "structured_endpoint": 153,
+          "yaml_document": 1,
+          "zip_text_member": 2,
+          "uri": 155
+        },
+        "warnings": {},
+        "protocols": {
+          "vmess": 250,
+          "shadowsocks": 16,
+          "trojan": 22,
+          "vless": 1
+        }
+      }
+    },
+    {
+      "url": "https://raw.githubusercontent.com/pojiezhiyuanjun/freev2/master/0102.zip",
+      "body_path": "http_evidence/983ef49c8fa57a24260a4bf5-a5225cb6e05f2a87.body",
+      "bytes": 84792,
+      "sha256": "a5225cb6e05f2a87f4a65bd010685734299820af434652e0c10ded325b934462",
+      "source_advertised_records": 160,
+      "before": {
+        "parser_version": 5,
+        "entries_found": 0,
+        "unique_entries": 0,
+        "duplicates_in_list": 0,
+        "invalid_entries": 37,
+        "invalid_reasons": {
+          "invalid_endpoint": 35,
+          "invalid_address_or_port": 2
+        },
+        "formats": {
+          "columns": 2
+        },
+        "warnings": {
+          "invalid_csv": 1,
+          "invalid_json_line": 9,
+          "no_supported_entries": 1
+        },
+        "protocols": {}
+      },
+      "after": {
+        "parser_version": 6,
+        "entries_found": 320,
+        "unique_entries": 302,
+        "duplicates_in_list": 18,
+        "invalid_entries": 0,
+        "invalid_reasons": {},
+        "formats": {
+          "zip_archive": 1,
+          "structured_endpoint": 160,
+          "yaml_document": 1,
+          "zip_text_member": 2,
+          "uri": 160
+        },
+        "warnings": {},
+        "protocols": {
+          "vmess": 249,
+          "shadowsocks": 18,
+          "trojan": 35
+        }
+      }
+    },
+    {
+      "url": "https://raw.githubusercontent.com/pojiezhiyuanjun/freev2/master/0103.zip",
+      "body_path": "http_evidence/1960a3b77c4f6292b0763718-9d5b0d4e000e81a2.body",
+      "bytes": 84377,
+      "sha256": "9d5b0d4e000e81a236723825c34a74b465412af12e1acabf95d654d0535859bd",
+      "source_advertised_records": 150,
+      "before": {
+        "parser_version": 5,
+        "entries_found": 0,
+        "unique_entries": 0,
+        "duplicates_in_list": 0,
+        "invalid_entries": 49,
+        "invalid_reasons": {
+          "invalid_endpoint": 48,
+          "invalid_address_or_port": 1
+        },
+        "formats": {
+          "columns": 1
+        },
+        "warnings": {
+          "invalid_csv": 1,
+          "invalid_json_line": 9,
+          "no_supported_entries": 1
+        },
+        "protocols": {}
+      },
+      "after": {
+        "parser_version": 6,
+        "entries_found": 298,
+        "unique_entries": 282,
+        "duplicates_in_list": 16,
+        "invalid_entries": 0,
+        "invalid_reasons": {},
+        "formats": {
+          "zip_archive": 1,
+          "structured_endpoint": 148,
+          "yaml_document": 1,
+          "zip_text_member": 2,
+          "uri": 150
+        },
+        "warnings": {},
+        "protocols": {
+          "vmess": 241,
+          "trojan": 27,
+          "shadowsocks": 12,
+          "vless": 2
+        }
+      }
+    },
+    {
+      "url": "https://amirrezafarnamtaheri.github.io/ConfigStream/side_products.zip",
+      "body_path": "http_evidence/9448eceee66a5fd9156303fa-d96a3ff79e3719d3.body",
+      "bytes": 55003,
+      "sha256": "d96a3ff79e3719d3b902c0b7641b9f42d951672284609cef83b3e599e1ea64cc",
+      "source_advertised_records": 2504,
+      "before": {
+        "parser_version": 5,
+        "entries_found": 0,
+        "unique_entries": 0,
+        "duplicates_in_list": 0,
+        "invalid_entries": 27,
+        "invalid_reasons": {
+          "invalid_endpoint": 25,
+          "invalid_address_or_port": 2
+        },
+        "formats": {
+          "plain_auth": 1,
+          "columns": 1
+        },
+        "warnings": {
+          "invalid_csv": 1,
+          "invalid_json_line": 5,
+          "no_supported_entries": 1
+        },
+        "protocols": {}
+      },
+      "after": {
+        "parser_version": 6,
+        "entries_found": 2424,
+        "unique_entries": 2424,
+        "duplicates_in_list": 0,
+        "invalid_entries": 18,
+        "invalid_reasons": {
+          "invalid_address_or_port": 18
+        },
+        "formats": {
+          "zip_archive": 1,
+          "uri": 2442,
+          "zip_text_member": 1
+        },
+        "warnings": {},
+        "protocols": {
+          "wireguard": 44,
+          "vless": 2,
+          "trojan": 1,
+          "socks5": 1537,
+          "socks4": 662,
+          "http": 155,
+          "https": 23
+        }
+      }
+    },
+    {
+      "url": "https://amirrezafarnamtaheri.github.io/ConfigStream/side_products-dns-safe.zip",
+      "body_path": "http_evidence/940964ab0235bf9bd0689548-e431e966f82d9d96.body",
+      "bytes": 54750,
+      "sha256": "e431e966f82d9d9698104581cfec81fd4925e5342982f3a1301a5fd749961dd3",
+      "source_advertised_records": 2502,
+      "before": {
+        "parser_version": 5,
+        "entries_found": 0,
+        "unique_entries": 0,
+        "duplicates_in_list": 0,
+        "invalid_entries": 33,
+        "invalid_reasons": {
+          "invalid_endpoint": 31,
+          "invalid_address_or_port": 2
+        },
+        "formats": {
+          "columns": 2
+        },
+        "warnings": {
+          "invalid_csv": 1,
+          "invalid_json_line": 2,
+          "no_supported_entries": 1
+        },
+        "protocols": {}
+      },
+      "after": {
+        "parser_version": 6,
+        "entries_found": 2423,
+        "unique_entries": 2423,
+        "duplicates_in_list": 0,
+        "invalid_entries": 17,
+        "invalid_reasons": {
+          "invalid_address_or_port": 17
+        },
+        "formats": {
+          "zip_archive": 1,
+          "uri": 2440,
+          "zip_text_member": 1
+        },
+        "warnings": {},
+        "protocols": {
+          "wireguard": 45,
+          "vless": 2,
+          "trojan": 1,
+          "socks5": 1537,
+          "socks4": 662,
+          "http": 155,
+          "https": 21
+        }
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "url": "https://raw.githubusercontent.com/Delta-Kronecker/WARP-Config/main/wireguard_configs.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 510884,
+      "members": 1194
+    },
+    {
+      "url": "https://raw.githubusercontent.com/amin4139/share_file/main/gfw_resist_HTTPS_proxy-main_4.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 616643,
+      "members": 36
+    },
+    {
+      "url": "https://raw.githubusercontent.com/vsvavan2/vpn-config-rkn/main/vless-checker.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 22687,
+      "members": 15
+    },
+    {
+      "url": "https://github.com/RKPchannel/RKP_bypass_configs/releases/download/%23RKP_Parser5.0.1/RKP_Parser5.0.1.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 107831281,
+      "members": 51
+    },
+    {
+      "url": "https://github.com/RKPchannel/RKP_bypass_configs/releases/download/%23RKP_Parser5.0/RKP_Parser5.0.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 94816659,
+      "members": 54
+    },
+    {
+      "url": "https://github.com/RKPchannel/RKP_bypass_configs/releases/download/%23RKP_Parser4.0.1/RKP_parser.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 19877770,
+      "members": 25
+    },
+    {
+      "url": "https://github.com/RKPchannel/RKP_bypass_configs/releases/download/%23RKP_Parser4.0/RKP_parser.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 19877138,
+      "members": 25
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Delta-Kronecker/ProtonVPN-WireGuard-configuration/main/ProtonVPN_WireGuard_Configs.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 51001,
+      "members": 113
+    },
+    {
+      "url": "https://raw.githubusercontent.com/boychongzen18/OpenClash_OpenWRT/main/Openclash-A.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 23851293,
+      "members": 130
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ZeusGamingPlay/panel-download/master/ss-mac.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 8322387,
+      "members": 192
+    },
+    {
+      "url": "https://raw.githubusercontent.com/26info/VLESS-Proxy-Tester/main/vless-proxy-tester.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 18538642,
+      "members": 7
+    },
+    {
+      "url": "https://raw.githubusercontent.com/admin2819/proxy-lists/master/proxy-list-master.zip",
+      "assessment": "missing_cached_body"
+    },
+    {
+      "url": "https://git.debros.io/DeBros/anyone-proxy-list/archive/main.zip",
+      "assessment": "missing_cached_body"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/delta-kronecker/vpn-gate/main/vpnGate_SSTP.zip",
+      "assessment": "missing_cached_body"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ipulgntng11-ui/proxylist/main/bool%20%281%29.zip",
+      "assessment": "missing_cached_body"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/wh1zz52/proxy-list/main/proxies_20260315_203234.zip",
+      "assessment": "missing_cached_body"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/JACKUSR2089/v2ray-subscribed/master/v2ray-agent-2.1.12.zip",
+      "assessment": "missing_cached_body"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/5af169634130ca2869df5106834356040fa1bc47/zavali20-final-professional.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 1313189,
+      "members": 170
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/4fedd1bebdf42b7a3faf552e23cf4d600a5e6f4a/release-linux-amd64.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 27171290,
+      "members": 8
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Delta-Kronecker/V2ray-Config/4fedd1bebdf42b7a3faf552e23cf4d600a5e6f4a/release-windows-amd64.zip",
+      "assessment": "archive_limits_require_review",
+      "bytes": 26781662,
+      "members": 8
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/56842054581a84b2c3effaceb65c2fb91cce5d3d/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 87577,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/a2e05ae43d231f031d24dc390685ba24f309420b/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 88745,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/4584cfc09bcb77f90d8bf5afa04d2873d0831f5b/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 90947,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/1b0d4f77ebc8453692db5e5a626b7a13265c3b6c/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 91457,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/85cdcb20e98f6aa9a3ca7dd9dec6646fe61e38b2/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 92449,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/500cdc39d6cbbdb3aba9ca797e41a7c0a2157027/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 91756,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/e42a10eaf8e35a376b135957ce10e9ddd805656d/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 96819,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/7fa6e49d019a0c7de47231a98f73537f45124633/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 149687,
+      "members": 70
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/205a7fe4cee11329eb93c860c15616236c5a740c/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 100995,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/909526c30c003c897d05a97936204053722490ef/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 100187,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/fd50e7692661dd88d96caec70917fbe3577fbdd5/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 99802,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/76b7f4ecc94175b904ab970025272eb7184c1b1a/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 104173,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/0380c8bfffc8a4f99b680c6d6632ca1caa9410cf/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 103828,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/9612f3dd45834b7687079ee180e6a31d319aae54/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 105460,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/674618c9b62de1a6e23b7a082710f2de704382fd/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 107839,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/f965fd12f76ee4c608cbac37cb0739f2f519e4eb/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 111001,
+      "members": 67
+    },
+    {
+      "url": "https://raw.githubusercontent.com/huangmlj/yvles/725c8e7441bf738d9b5896540e54ee9ddbf9ebaf/sub/1-bilion-proxyip.zip",
+      "assessment": "no_confirmed_gain",
+      "bytes": 119045,
+      "members": 67
+    }
+  ],
+  "local_tests": "53 proxy/parser/pagination tests passed",
+  "remote_audit_directory": "/work/.local/extractor-agent/workspace/.local/extractor/audit/zip",
+  "replay_urls_sha256": "26ceb2ec809cf705f1b1d3ee092c49f5d414687eef3b6534fe8a16a3d373d0dc",
+  "interpretation": "Cached source extraction counts and existing connection keys, not database imports or unique configuration growth. YAML and URI representations can describe the same configuration."
+}
