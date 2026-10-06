@@ -10,13 +10,17 @@ import io
 import ipaddress
 import json
 import re
+import stat
 import xml.etree.ElementTree as ET
+import zipfile
+import zlib
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import yaml
 
-PARSER_VERSION = 5
+PARSER_VERSION = 6
 ALIASES = {
     'socks': 'socks5', 'socks5h': 'socks5', 'socks4a': 'socks4',
     'ss': 'shadowsocks', 'ssr': 'shadowsocksr', 'hy': 'hysteria', 'hy2': 'hysteria2',
@@ -49,6 +53,10 @@ URI_RE = re.compile(
 )
 ENDPOINT_RE = re.compile(r'^(\[[0-9a-fA-F:.]+\]|[^\s:/,;@]+):(\d{1,5})(?::([^:]*):(.*))?$')
 BASE64_RE = re.compile(r'^[A-Za-z0-9+/=_\-\s]+$')
+ZIP_TEXT_SUFFIXES = {'.txt', '.json', '.yaml', '.yml', '.csv', '.xml'}
+ZIP_MAX_MEMBERS = 1024
+ZIP_MAX_MEMBER_BYTES = 16 * 1024**2
+ZIP_MAX_TOTAL_BYTES = 64 * 1024**2
 
 
 def protocol_name(value):
@@ -161,6 +169,7 @@ class Parsed:
     invalid: collections.Counter = field(default_factory=collections.Counter)
     formats: collections.Counter = field(default_factory=collections.Counter)
     warnings: collections.Counter = field(default_factory=collections.Counter)
+    require_protocol: bool = field(default=False, repr=False)
 
     def add(self, address, port, protocol='unknown', settings=None):
         address = public_address(address)
@@ -174,6 +183,9 @@ class Parsed:
             self.invalid['invalid_address_or_port'] += 1
             return
         protocol = protocol_name(protocol) or 'unknown'
+        if self.require_protocol and protocol == 'unknown':
+            self.invalid['missing_zip_protocol'] += 1
+            return
         try:
             proxy = Proxy(address, port, protocol, clean_json(settings or {}))
             key = proxy.key
@@ -482,6 +494,11 @@ class Parser:
         if depth > 2:
             self.result.warnings['nested_encoding_limit'] += 1
             return self.result
+        if body.startswith((b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08')):
+            if depth:
+                self.result.warnings['nested_zip_archive'] += 1
+                return self.result
+            return self.parse_zip(body, depth)
         text = body.decode('utf-8-sig', errors='replace').strip()
         if not text:
             return self.result
@@ -594,6 +611,76 @@ class Parser:
             self.line(line)
         if not self.result.entries_found:
             self.result.warnings['no_supported_entries'] += 1
+        return self.result
+
+    def parse_zip(self, body, depth):
+        """Read complete text members in memory, retaining ordinary parser roles."""
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(body))
+        except (zipfile.BadZipFile, UnicodeError, ValueError):
+            self.result.warnings['invalid_zip_archive'] += 1
+            return self.result
+        with archive:
+            members = archive.infolist()
+            if len(members) > ZIP_MAX_MEMBERS:
+                self.result.warnings['zip_member_count_limit'] += 1
+                return self.result
+            self.result.formats['zip_archive'] += 1
+            total = 0
+            for info in members:
+                path = PurePosixPath(info.filename)
+                parts = [part.lower() for part in path.parts]
+                if (info.is_dir() or path.suffix.lower() not in ZIP_TEXT_SUFFIXES
+                        or path.is_absolute() or '\\' in info.filename
+                        or '\x00' in info.orig_filename
+                        or any(part.startswith('.') or ':' in part or part == '__macosx' for part in parts)
+                        or any(part in {'examples', 'example', 'samples', 'sample', 'docs', 'tests', 'fixtures'}
+                               for part in parts[:-1])
+                        or path.stem.lower() in {'readme', 'license', 'changelog', 'example', 'sample'}):
+                    continue
+                mode = stat.S_IFMT(info.external_attr >> 16)
+                if mode not in (0, stat.S_IFREG):
+                    continue
+                if info.flag_bits & 1:
+                    self.result.warnings['encrypted_zip_member'] += 1
+                    continue
+                if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    self.result.warnings['unsupported_zip_compression'] += 1
+                    continue
+                if info.file_size > ZIP_MAX_MEMBER_BYTES:
+                    self.result.warnings['zip_member_size_limit'] += 1
+                    continue
+                if total + info.file_size > ZIP_MAX_TOTAL_BYTES:
+                    self.result.warnings['zip_expansion_limit'] += 1
+                    continue
+                total += info.file_size
+                try:
+                    # ZipInfo identifies each entry even when filenames repeat.
+                    with archive.open(info) as stream:
+                        member = stream.read(info.file_size + 1)
+                    if len(member) != info.file_size:
+                        raise zipfile.BadZipFile('ZIP member size mismatch')
+                    member.decode('utf-8-sig')
+                    if b'\x00' in member:
+                        raise UnicodeError('Binary ZIP member')
+                except UnicodeError:
+                    self.result.warnings['binary_zip_member'] += 1
+                    continue
+                except (zipfile.BadZipFile, EOFError, ValueError, OSError, RuntimeError, zlib.error):
+                    self.result.warnings['invalid_zip_member'] += 1
+                    continue
+                # Bare relay IP pools can look like proxy lists. New archive
+                # support requires an explicit protocol or one source hint.
+                hints = () if self.default_protocol == 'unknown' else (self.default_protocol,)
+                parser = Parser(hints)
+                parser.result.require_protocol = True
+                parsed = parser.parse(member, depth=depth + 1)
+                self.result.entries_found += parsed.entries_found
+                for key, proxy in parsed.proxies.items():
+                    self.result.proxies.setdefault(key, proxy)
+                for name in ('invalid', 'warnings', 'formats'):
+                    getattr(self.result, name).update(getattr(parsed, name))
+                self.result.formats['zip_text_member'] += 1
         return self.result
 
     def recover_yaml_proxies(self, text):
