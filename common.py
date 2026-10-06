@@ -42,7 +42,7 @@ def write_json(path, value):
     os.replace(temp, path)
 
 def config():
-    c = read_json(ROOT / 'config.local.json')
+    c = read_json(Path(os.environ.get('PROXY_CATALOG_CONFIG', ROOT / 'config.local.json')))
     if c is None:
         raise RuntimeError('Create config.local.json from config.example.json first')
     if c['model'] != 'gpt-6.1-sol' or c['reasoning_effort'] != 'max':

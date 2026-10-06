@@ -524,7 +524,17 @@ worker.apply_download(c,j,job,json.loads(job['result']))
                     if started.is_set(): break
                     await asyncio.sleep(0.01)
                 self.assertTrue(started.is_set())
-                await asyncio.sleep(0.15)
+                # Wait for durable payloads, independent of host scheduling or
+                # storage latency, before cancelling the queued imports.
+                cached = 0
+                for _ in range(800):
+                    with self.journal.mutex:
+                        cached = self.journal.conn.execute("""SELECT count(*) FROM jobs
+                            WHERE run_id='shutdown' AND json_extract(result,'$.status')='downloaded'""").fetchone()[0]
+                    if cached == 6:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(cached, 6)
                 task.cancel()
                 asyncio.get_running_loop().call_later(0.1, release.set)
                 with self.assertRaises(asyncio.CancelledError):
