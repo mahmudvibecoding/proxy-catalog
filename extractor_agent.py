@@ -69,8 +69,8 @@ def signature(path):
         return None
 
 
-def git(*args, cwd=WORKSPACE):
-    return capture(['git', *args], cwd=cwd).strip()
+def git(*args, cwd=None):
+    return capture(['git', *args], cwd=cwd or WORKSPACE).strip()
 
 
 def prepare_workspace():
@@ -94,9 +94,6 @@ def prepare_workspace():
 
 
 def agent_command(c, session=None):
-    git_dir = Path(git('rev-parse', '--git-common-dir', cwd=ROOT))
-    if not git_dir.is_absolute():
-        git_dir = ROOT / git_dir
     prompt = ('Read .local/extractor/TASK.md and .local/extractor/context.json in full. '
               'Continue the extractor development queue, preserve prior work, and deliver one tested '
               'improvement batch or a precise idle/blocked report in .local/extractor/report.json.')
@@ -104,7 +101,7 @@ def agent_command(c, session=None):
                '-c', f'model_reasoning_effort="{EFFORT}"', '-c', 'forced_login_method="chatgpt"',
                '-c', 'web_search="live"', '-c', 'approval_policy="never"',
                '--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true',
-               '--add-dir', str(git_dir.resolve()), '--json', '-C', str(WORKSPACE)]
+               '--json', '-C', str(WORKSPACE)]
     if session:
         command += ['resume', session, prompt]
     else:
@@ -127,8 +124,9 @@ def read_report(path):
     if not isinstance(report.get('summary'), str) or not report['summary'].strip():
         raise RuntimeError('Extractor report needs a concrete summary')
     if report['status'] == 'ready':
-        if not re.fullmatch(r'[a-f0-9]{40}', report.get('commit', '')):
-            raise RuntimeError('Ready report requires a full Git commit')
+        revision = report.get('commit') or report.get('baseline_commit')
+        if not isinstance(revision, str) or not re.fullmatch(r'[a-f0-9]{40}', revision):
+            raise RuntimeError('Ready report requires a full baseline or completed Git commit')
         if type(report.get('parser_version')) is not int:
             raise RuntimeError('Ready report requires a parser version')
         if not isinstance(report.get('replay_urls'), list) or not report['replay_urls']:
@@ -194,10 +192,66 @@ def run_agent(c, state, gap):
 
 
 def allowed_change(name):
+    path = Path(name)
+    if (path.is_absolute() or '..' in path.parts or any(part.startswith('.') for part in path.parts)
+            or any(ord(char) < 32 for char in name)):
+        return False
     return (name == 'vendor/proxy_formats.py' or
             (name.startswith('vendor/proxy_formats_') and name.endswith('.py')) or
             name.startswith('vendor/formats/') or name.startswith(('tests/fixtures/proxy/', 'tests/fixtures/proxy_format_gaps/')) or
             (name.startswith('tests/test_proxy') and name.endswith('.py')) or name.startswith('docs/parser/'))
+
+
+def candidate_changes():
+    names = set(git('diff', '--name-only', '-z', 'HEAD').split('\0'))
+    names.update(git('ls-files', '-z', '--others', '--exclude-standard').split('\0'))
+    names.discard('')
+    root = WORKSPACE.resolve()
+    for name in names:
+        path = WORKSPACE / name
+        if not allowed_change(name):
+            raise NeedsAgent('Extractor changed a file outside its scope: ' + name)
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
+            raise NeedsAgent('Extractor changes must be ordinary workspace files: ' + name)
+        if path.exists() and not path.is_file():
+            raise NeedsAgent('Extractor change is not a regular file: ' + name)
+    return sorted(names)
+
+
+def commit_candidate(state, report):
+    """The runner owns Git writes; the sandboxed developer hands off file edits."""
+    if report.get('commit'):
+        return report
+    baseline = report['baseline_commit']
+    head = git('rev-parse', 'HEAD')
+    pending = state.get('pending_commit')
+    if head != baseline:
+        # Recover a commit completed just before the runner was interrupted.
+        if (not pending or pending['baseline'] != baseline
+                or git('rev-parse', 'HEAD^{tree}') != pending['tree']
+                or git('rev-parse', 'HEAD^') != baseline or git('status', '--porcelain')):
+            raise NeedsAgent('Candidate baseline changed; inspect the saved edits and refresh the report')
+    else:
+        paths = candidate_changes()
+        if not paths:
+            raise NeedsAgent('Ready candidate contains no changes; report idle or a completed commit')
+        if parser_version(WORKSPACE / 'vendor/proxy_formats.py') != report['parser_version']:
+            raise NeedsAgent('Candidate parser version differs from the report')
+        save(state, phase='committing', pending_report=report)
+        run(['git', 'add', '--all', '--', *paths], cwd=WORKSPACE, stdout=subprocess.DEVNULL)
+        tree = git('write-tree')
+        save(state, pending_commit={'baseline': baseline, 'tree': tree})
+        run(['git', 'commit', '-m', f'Improve proxy extraction (parser v{report["parser_version"]})'],
+            cwd=WORKSPACE, stdout=subprocess.DEVNULL)
+        head = git('rev-parse', 'HEAD')
+        if git('rev-parse', 'HEAD^{tree}') != tree or git('status', '--porcelain'):
+            raise NeedsAgent('Candidate changed while committing; inspect the preserved checkout')
+    ready = {**report, 'commit': head}
+    save(state, phase='pending', pending_report=ready, last_report=ready)
+    state.pop('pending_commit', None)
+    save(state)
+    write_json(WORKSPACE / '.local/extractor/report.json', ready)
+    return ready
 
 
 def parser_version(path):
@@ -212,6 +266,7 @@ def parser_version(path):
 
 def promote(c, state, report):
     """Tests, main integration, deployment and replay can all be retried after interruption."""
+    report = commit_candidate(state, report)
     revision = report['commit']
     if git('status', '--porcelain') or git('rev-parse', 'HEAD') != revision:
         raise NeedsAgent('Ready report must match a clean extractor checkout')

@@ -142,9 +142,11 @@ login. Enable `extractor_agent.enabled` in `config.local.json`, then run:
 ```
 
 It audits actual saved source bodies behind `parser_gaps.json`, adds focused
-parser support and regression fixtures in a separate Git worktree, and commits
-each useful batch. Large audits and the full tests run on the configured server.
-The runner verifies the exact code snapshot, integrates and pushes it under the
+parser support and regression fixtures in a separate Git worktree, and hands off
+each tested batch. Large audits and the full tests run on the configured server.
+The sandboxed developer leaves Git metadata to the runner. The runner validates
+the changed-file scope, creates a recoverable commit, verifies the exact code
+snapshot, integrates and pushes it under the
 publication lock, deploys with a verified rollback copy, and requeues the named
 sources using saved payloads where available. It reports extracted records and
 database imports separately. Dependencies or collector/schema changes outside

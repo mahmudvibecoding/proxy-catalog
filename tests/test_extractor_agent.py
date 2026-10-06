@@ -46,6 +46,8 @@ class AgentRecoveryTests(unittest.TestCase):
         self.assertIn('forced_login_method="chatgpt"', command)
         self.assertEqual(command[command.index('resume') + 1], 'saved-session')
         self.assertIn('--ignore-user-config', command)
+        self.assertEqual(command[command.index('--sandbox') + 1], 'workspace-write')
+        self.assertNotIn('--add-dir', command)
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'secret', 'CODEX_API_KEY': 'secret',
                                      'CODEX_ACCESS_TOKEN': 'secret', 'PROXY_CATALOG_CONFIG': 'another-job'}):
             env = agent.agent_environment()
@@ -163,6 +165,101 @@ class AgentRecoveryTests(unittest.TestCase):
             self.assertFalse(agent.allowed_change(path))
         self.assertTrue(agent.allowed_change('vendor/proxy_formats.py'))
         self.assertTrue(agent.allowed_change('tests/test_proxy_format_gaps.py'))
+
+
+class CandidateCommitTests(unittest.TestCase):
+    def setUp(self):
+        AgentRecoveryTests.setUp(self)
+        def git(*args):
+            return subprocess.check_output(['git', *args], cwd=self.workspace,
+                                           text=True, stderr=subprocess.DEVNULL).strip()
+        self.git = git
+        git('init', '-b', agent.BRANCH)
+        git('config', 'user.name', 'Extractor test')
+        git('config', 'user.email', 'extractor@example.test')
+        (self.workspace / '.gitignore').write_text('.local/\n')
+        (self.workspace / 'vendor').mkdir()
+        (self.workspace / 'vendor/proxy_formats.py').write_text('PARSER_VERSION = 5\n')
+        git('add', '.')
+        git('commit', '-m', 'Baseline')
+        self.baseline = git('rev-parse', 'HEAD')
+        self.report = {'status': 'ready', 'summary': 'Read complete ZIP members',
+                       'baseline_commit': self.baseline, 'parser_version': 6,
+                       'replay_urls': ['https://publisher.example/archive.zip']}
+        (self.workspace / 'vendor/proxy_formats.py').write_text('PARSER_VERSION = 6\n')
+        (self.workspace / 'tests').mkdir()
+        (self.workspace / 'tests/test_proxy_candidate.py').write_text('# regression fixture\n')
+
+    def test_runner_commits_scoped_uncommitted_report_and_preserves_session(self):
+        path = self.workspace / '.local/extractor/report.json'
+        write_json(path, self.report)
+        state = {'session_id': 'saved-session'}
+        ready = agent.commit_candidate(state, agent.read_report(path))
+        self.assertEqual(ready['commit'], self.git('rev-parse', 'HEAD'))
+        self.assertEqual(self.git('rev-parse', 'HEAD^'), self.baseline)
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.assertEqual(state['pending_report'], ready)
+        self.assertEqual(state['session_id'], 'saved-session')
+        self.assertNotIn('pending_commit', state)
+        self.assertEqual(read_json(path), ready)
+
+    def test_commit_interruption_recovers_without_duplicate_commit(self):
+        real_save = agent.save
+        def interrupt(state, **values):
+            if values.get('phase') == 'pending':
+                raise agent.catalog.RunInterrupted(15)
+            return real_save(state, **values)
+        with patch.object(agent, 'save', side_effect=interrupt):
+            with self.assertRaises(agent.catalog.RunInterrupted):
+                agent.commit_candidate({}, self.report)
+        revision = self.git('rev-parse', 'HEAD')
+        state = read_json(self.state)
+        self.assertIn('pending_commit', state)
+        ready = agent.commit_candidate(state, state['pending_report'])
+        self.assertEqual(ready['commit'], revision)
+        self.assertEqual(self.git('rev-list', '--count', 'HEAD'), '2')
+
+    def test_unrelated_changes_are_rejected_before_any_git_write(self):
+        (self.workspace / 'config.local.json').write_text('{}\n')
+        with self.assertRaisesRegex(agent.NeedsAgent, 'outside its scope'):
+            agent.commit_candidate({}, self.report)
+        self.assertEqual(self.git('diff', '--cached', '--name-only'), '')
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.baseline)
+
+    def test_graceful_shutdown_keeps_commit_recovery_checkpoint(self):
+        real_save = agent.save
+        def interrupt(state, **values):
+            if values.get('phase') == 'pending':
+                raise agent.catalog.RunInterrupted(15)
+            return real_save(state, **values)
+        real_popen = subprocess.Popen
+        def start(*args, **kwargs):
+            if args[0][0] == '/usr/bin/caffeinate':
+                return Mock()
+            return real_popen(*args, **kwargs)
+        with patch.object(agent, 'save', side_effect=interrupt), \
+             patch.object(agent.extractor_remote, 'status', return_value=self.gap), \
+             patch.object(agent, 'run_agent', return_value=self.report), \
+             patch.object(agent.subprocess, 'Popen', side_effect=start):
+            result = agent.execute(self.c, force=True)
+        self.assertEqual(result['phase'], 'interrupted')
+        state = read_json(self.state)
+        self.assertIn('pending_commit', state)
+        ready = agent.commit_candidate(state, state['pending_report'])
+        self.assertEqual(ready['commit'], self.git('rev-parse', 'HEAD'))
+        self.assertEqual(self.git('rev-list', '--count', 'HEAD'), '2')
+
+    def test_symlink_fixture_cannot_be_committed(self):
+        (self.workspace / 'tests/test_proxy_link.py').symlink_to(self.root / 'outside')
+        with self.assertRaisesRegex(agent.NeedsAgent, 'ordinary workspace files'):
+            agent.commit_candidate({}, self.report)
+        self.assertEqual(self.git('rev-parse', 'HEAD'), self.baseline)
+
+    def test_changed_baseline_is_rejected_without_losing_edits(self):
+        report = {**self.report, 'baseline_commit': 'a' * 40}
+        with self.assertRaisesRegex(agent.NeedsAgent, 'baseline changed'):
+            agent.commit_candidate({}, report)
+        self.assertEqual((self.workspace / 'vendor/proxy_formats.py').read_text(), 'PARSER_VERSION = 6\n')
 
 
 class ReplayTests(unittest.TestCase):

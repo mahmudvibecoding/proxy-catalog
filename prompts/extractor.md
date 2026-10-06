@@ -32,13 +32,18 @@ Keep existing regression tests passing. If a change needs a new dependency or a
 collector/schema change outside these paths, record the concrete requirement as
 blocked; do not rewrite a large general-purpose library to avoid that boundary.
 
-Commit your tested changes on the assigned `codex/extractor-development` branch.
-The runner independently runs the full tests, integrates on main under the
-publication lock, pushes, deploys, and queues only the named affected sources.
+Leave your tested changes in the assigned worktree and report `ready` with
+`baseline_commit` set to the current `git rev-parse HEAD`. The sandbox protects
+Git metadata: do not run `git add`, `git commit`, or `git merge`. The runner
+checks the changed-file scope, commits the batch, independently runs the full
+tests, integrates on main under the publication lock, pushes, deploys, and queues
+only the named affected sources.
 Do not alter main, push, deploy, restart services, change the live database, or
 requeue sources yourself. Do not edit the runner, credentials or configuration.
-If main has advanced, merge `main` into this isolated branch and retest; preserve
-and resolve your changes rather than resetting or discarding them.
+The runner merges main into a clean worktree before the next coding turn.
+Preserve interrupted edits; never reset or discard them. If a previously
+committed batch needs another verification attempt and the checkout is clean,
+return `ready` with `commit` set to the current HEAD and its existing replay list.
 
 ## Execution and boundaries
 
@@ -71,7 +76,7 @@ Write `.local/extractor/report.json` atomically at every completed turn:
 {
   "status": "ready",
   "summary": "The confirmed failure, resulting behavior and observed gain",
-  "commit": "full Git commit of the clean tested checkout",
+  "baseline_commit": "full current Git HEAD before the runner commits your edits",
   "parser_version": 5,
   "replay_urls": ["exact affected source URLs backed by the audit"],
   "tests": ["commands and actual results"],
@@ -79,7 +84,7 @@ Write `.local/extractor/report.json` atomically at every completed turn:
 }
 ```
 
-Use `ready` only after committing a working change with a verified replay target
+Use `ready` only after testing a working change with a verified replay target
 list. Use `incomplete` when useful work remains in this batch and is saved for
 resumption. Use `idle` only after all currently actionable audited gaps are
 handled. Use `blocked` for a specific external dependency, access limitation or
