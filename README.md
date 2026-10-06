@@ -130,6 +130,38 @@ fingerprints and sequence values before starting its worker. Never run both
 collectors against independent copies of the queue. Do not remove the local
 rollback copy as part of the cutover.
 
+## Background extractor development
+
+The optional extractor developer runs independently of discovery through its own
+macOS LaunchAgent, using `gpt-6.1-sol` with `max` reasoning and the Mac's ChatGPT
+login. Enable `extractor_agent.enabled` in `config.local.json`, then run:
+
+```sh
+.venv/bin/python extractor_agent.py install
+.venv/bin/python extractor_agent.py status
+```
+
+It audits actual saved source bodies behind `parser_gaps.json`, adds focused
+parser support and regression fixtures in a separate Git worktree, and commits
+each useful batch. Large audits and the full tests run on the configured server.
+The runner verifies the exact code snapshot, integrates and pushes it under the
+publication lock, deploys with a verified rollback copy, and requeues the named
+sources using saved payloads where available. It reports extracted records and
+database imports separately. Dependencies or collector/schema changes outside
+the parser scope are reported as blockers.
+
+The LaunchAgent starts after login and checks once a minute. Interrupted coding
+turns resume the saved Codex session; pending deployments and replay requests are
+retried from durable checkpoints. A lock prevents overlapping runs. Idle checks
+back off to 15 minutes and do not invoke the model when the gap inputs have not
+changed. Development resumes when the Mac and network are available; collection
+continues on the server while the Mac is offline.
+
+State, logs and release receipts live in `.local/extractor-agent/`. Run
+`.venv/bin/python extractor_agent.py disable` to stop only this agent and retain
+its work and checkpoints. The existing discovery and publication controls are
+independent.
+
 ## Daily behavior
 
 The research LaunchAgent checks once a minute. When the signed-in user is at an unlocked, awake display and the internet is available, it starts the day's research run. The timezone is Asia/Tashkent. Later wakes do not repeat a completed day's research. An unfinished research run is resumed, and a process lock prevents overlap. Several missed days produce one current research run. Collection and publication have their own schedules.

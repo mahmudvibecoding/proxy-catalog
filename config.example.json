@@ -13,6 +13,11 @@
   "chunk_bytes": 536870912,
   "retain_daily": 7,
   "retain_weekly": 4,
+  "extractor_agent": {
+    "enabled": false,
+    "idle_seconds": 900,
+    "retry_seconds": 60
+  },
   "continuous": {
     "enabled": true,
     "intake_seconds": 300,

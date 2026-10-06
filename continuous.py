@@ -120,7 +120,7 @@ class Journal:
         with self.transaction() as conn:
             conn.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', (key, json.dumps(value)))
 
-    def enqueue(self, run_id, rows, signature, checksum):
+    def enqueue(self, run_id, rows, signature, checksum, *, record_input=True):
         added = 0
         with self.transaction() as conn:
             for row in rows:
@@ -137,8 +137,9 @@ class Journal:
                         AND id<>? AND state IN ('pending','retry')
                         AND coalesce(json_extract(result,'$.status'),'') NOT IN ('downloaded','downloaded_partial')""",
                         (row['url'], ident))
-            conn.execute('INSERT OR REPLACE INTO inputs VALUES(?,?,?,?,?)',
-                         (run_id, signature, checksum, len(rows), now()))
+            if record_input:
+                conn.execute('INSERT OR REPLACE INTO inputs VALUES(?,?,?,?,?)',
+                             (run_id, signature, checksum, len(rows), now()))
         return added
 
     def recover(self):
